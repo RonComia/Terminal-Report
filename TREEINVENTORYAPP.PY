@@ -1,0 +1,1587 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk, simpledialog, PhotoImage, Canvas
+import os
+import sys
+import pandas as pd
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
+from PIL import Image, ImageTk, ImageOps
+import glob
+import re
+import threading
+import math
+from datetime import datetime
+
+class TreeInventoryApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Tree Inventory Manager")
+        self.root.configure(bg="#1E1E1E")
+        
+        self.root.geometry("800x600")
+        self.root.minsize(600, 400)
+        
+        self.main_frame = tk.Frame(root, bg="#1E1E1E")
+        self.main_frame.place(relx=0.05, rely=0.05, relwidth=0.9, relheight=0.9)
+        
+        self.create_header()
+        self.create_content()
+        
+        self.excel_file_path = None
+        self.image_folder_path = None
+        self.output_folder_path = None
+        self.start_row = 2
+        self.batch_size = 1002
+        self.num_batches_to_process = None
+        
+        self.image_pattern = "auto_detect"
+        self.use_subfolders = True
+        
+        self.image_cache = {}
+        self.pattern_stats = {}
+
+    def create_header(self):
+        header_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
+        header_frame.place(relx=0.5, rely=0.05, relwidth=0.9, relheight=0.1, anchor="n")
+        
+        self.inventory_btn = tk.Button(
+            header_frame, 
+            text="INVENTORY", 
+            bg="#1E1E1E", 
+            fg="#FFC107",
+            activebackground="#2A2A2A",
+            activeforeground="#FFC107",
+            bd=0,
+            font=("Arial", 10, "bold"),
+            command=self.show_inventory
+        )
+        self.inventory_btn.pack(side=tk.LEFT, padx=10)
+        
+        self.cutting_btn = tk.Button(
+            header_frame, 
+            text="CUTTING", 
+            bg="#1E1E1E", 
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFC107",
+            bd=0,
+            font=("Arial", 10, "bold"),
+            command=self.show_cutting
+        )
+        self.cutting_btn.pack(side=tk.LEFT, padx=10)
+
+    def create_content(self):
+        content_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
+        content_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        
+        self.excel_btn = tk.Button(
+            content_frame,
+            text="INSERT EXCEL FILE",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10, "bold"),
+            width=20,
+            height=2,
+            command=self.select_excel_file
+        )
+        self.excel_btn.place(relx=0.5, rely=0.5, anchor="center")
+
+    def show_inventory(self):
+        self.inventory_btn.config(fg="#FFC107")
+        self.cutting_btn.config(fg="#FFFFFF")
+        
+        self.clear_content()
+        
+        inventory_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
+        inventory_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        
+        select_excel_btn = tk.Button(
+            inventory_frame,
+            text="Select Excel File",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_excel_file
+        )
+        select_excel_btn.pack(pady=5)
+        
+        select_images_btn = tk.Button(
+            inventory_frame,
+            text="Select Images Folder",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_image_folder
+        )
+        select_images_btn.pack(pady=5)
+        
+        select_output_btn = tk.Button(
+            inventory_frame,
+            text="Select Output Folder",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_output_folder
+        )
+        select_output_btn.pack(pady=5)
+        
+        settings_btn = tk.Button(
+            inventory_frame,
+            text="Image Naming Settings",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.show_image_settings
+        )
+        settings_btn.pack(pady=5)
+        
+        config_frame = tk.Frame(inventory_frame, bg="#1E1E1E", bd=1, relief=tk.SOLID)
+        config_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        start_row_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        start_row_frame.pack(pady=5, fill=tk.X)
+        
+        start_row_label = tk.Label(
+            start_row_frame,
+            text="Start Row:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        start_row_label.pack(side=tk.LEFT, padx=5)
+        
+        self.start_row_var = tk.StringVar(value=str(self.start_row))
+        start_row_entry = tk.Entry(
+            start_row_frame,
+            textvariable=self.start_row_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=10
+        )
+        start_row_entry.pack(side=tk.LEFT, padx=5)
+        
+        batch_size_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        batch_size_frame.pack(pady=5, fill=tk.X)
+        
+        batch_size_label = tk.Label(
+            batch_size_frame,
+            text="Batch Size:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        batch_size_label.pack(side=tk.LEFT, padx=5)
+        
+        self.batch_size_var = tk.StringVar(value=str(self.batch_size))
+        batch_size_entry = tk.Entry(
+            batch_size_frame,
+            textvariable=self.batch_size_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=10
+        )
+        batch_size_entry.pack(side=tk.LEFT, padx=5)
+        
+        num_batches_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        num_batches_frame.pack(pady=5, fill=tk.X)
+        
+        num_batches_label = tk.Label(
+            num_batches_frame,
+            text="Batches to Process:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        num_batches_label.pack(side=tk.LEFT, padx=5)
+        
+        self.num_batches_var = tk.StringVar(value="All")
+        num_batches_entry = tk.Entry(
+            num_batches_frame,
+            textvariable=self.num_batches_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=10
+        )
+        num_batches_entry.pack(side=tk.LEFT, padx=5)
+        
+        help_label = tk.Label(
+            num_batches_frame,
+            text="(Enter 'All' or a number)",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8)
+        )
+        help_label.pack(side=tk.LEFT, padx=5)
+        
+        self.process_btn = tk.Button(
+            inventory_frame,
+            text="Generate Word Documents",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10, "bold"),
+            command=self.process_data,
+            state=tk.DISABLED
+        )
+        self.process_btn.pack(pady=10)
+        
+        self.status_frame = tk.Frame(inventory_frame, bg="#1E1E1E")
+        self.status_frame.pack(fill=tk.X, pady=10)
+        
+        self.excel_label = tk.Label(
+            self.status_frame,
+            text="Excel File: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.excel_label.pack(fill=tk.X)
+        
+        self.images_label = tk.Label(
+            self.status_frame,
+            text="Images Folder: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.images_label.pack(fill=tk.X)
+        
+        self.output_label = tk.Label(
+            self.status_frame,
+            text="Output Folder: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.output_label.pack(fill=tk.X)
+        
+        pattern_name = next((name for name, val in [
+            ("Simple numbers", "simple_numbers"),
+            ("Tree prefix", "tree_prefix"),
+            ("Alpha-numeric", "alpha_numeric"),
+            ("Number with suffix", "number_suffix"),
+            ("Auto-detect", "auto_detect")
+        ] if val == self.image_pattern), "Unknown")
+        
+        self.settings_label = tk.Label(
+            self.status_frame,
+            text=f"Pattern: {pattern_name} | Subfolders: {'Yes' if self.use_subfolders else 'No'}",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.settings_label.pack(fill=tk.X)
+        
+        self.progress_frame = tk.Frame(inventory_frame, bg="#1E1E1E")
+        self.progress_frame.pack(fill=tk.X, pady=10)
+        
+        self.progress_label = tk.Label(
+            self.progress_frame,
+            text="Progress:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 8),
+        )
+        self.progress_label.pack(anchor="w")
+        
+        self.progress_bar = ttk.Progressbar(
+            self.progress_frame,
+            orient="horizontal",
+            length=300,
+            mode="determinate"
+        )
+        self.progress_bar.pack(fill=tk.X, pady=5)
+        
+        self.progress_frame.pack_forget()
+
+    def show_cutting(self):
+        self.inventory_btn.config(fg="#696969")
+        self.cutting_btn.config(fg="#FFC107")
+        
+        self.clear_content()
+        
+        cutting_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
+        cutting_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        
+        select_before_btn = tk.Button(
+            cutting_frame,
+            text="Select Before Images Folder",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_before_images
+        )
+        select_before_btn.pack(pady=5)
+        
+        select_after_btn = tk.Button(
+            cutting_frame,
+            text="Select After Images Folder",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_after_images
+        )
+        select_after_btn.pack(pady=5)
+        
+        select_excel_btn = tk.Button(
+            cutting_frame,
+            text="Select Excel File",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_cutting_excel
+        )
+        select_excel_btn.pack(pady=5)
+        
+        select_output_btn = tk.Button(
+            cutting_frame,
+            text="Select Output Folder",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.select_cutting_output
+        )
+        select_output_btn.pack(pady=5)
+        
+        config_frame = tk.Frame(cutting_frame, bg="#1E1E1E", bd=1, relief=tk.SOLID)
+        config_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        start_row_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        start_row_frame.pack(pady=5, fill=tk.X)
+        
+        start_row_label = tk.Label(
+            start_row_frame,
+            text="Start Row:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        start_row_label.pack(side=tk.LEFT, padx=5)
+        
+        self.cutting_start_row_var = tk.StringVar(value="2")
+        start_row_entry = tk.Entry(
+            start_row_frame,
+            textvariable=self.cutting_start_row_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=10
+        )
+        start_row_entry.pack(side=tk.LEFT, padx=5)
+        
+        batch_size_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        batch_size_frame.pack(pady=5, fill=tk.X)
+        
+        batch_size_label = tk.Label(
+            batch_size_frame,
+            text="Batch Size:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        batch_size_label.pack(side=tk.LEFT, padx=5)
+        
+        self.cutting_batch_size_var = tk.StringVar(value="100")
+        batch_size_entry = tk.Entry(
+            batch_size_frame,
+            textvariable=self.cutting_batch_size_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=10
+        )
+        batch_size_entry.pack(side=tk.LEFT, padx=5)
+        
+        self.cutting_process_btn = tk.Button(
+            cutting_frame,
+            text="Generate Cutting Documents",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10, "bold"),
+            command=self.process_cutting_data,
+            state=tk.DISABLED
+        )
+        self.cutting_process_btn.pack(pady=10)
+        
+        self.cutting_status_frame = tk.Frame(cutting_frame, bg="#1E1E1E")
+        self.cutting_status_frame.pack(fill=tk.X, pady=10)
+        
+        self.before_images_label = tk.Label(
+            self.cutting_status_frame,
+            text="Before Images: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.before_images_label.pack(fill=tk.X)
+        
+        self.after_images_label = tk.Label(
+            self.cutting_status_frame,
+            text="After Images: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.after_images_label.pack(fill=tk.X)
+        
+        self.cutting_excel_label = tk.Label(
+            self.cutting_status_frame,
+            text="Excel File: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.cutting_excel_label.pack(fill=tk.X)
+        
+        self.cutting_output_label = tk.Label(
+            self.cutting_status_frame,
+            text="Output Folder: Not selected",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        self.cutting_output_label.pack(fill=tk.X)
+        
+        self.cutting_progress_frame = tk.Frame(cutting_frame, bg="#1E1E1E")
+        self.cutting_progress_frame.pack(fill=tk.X, pady=10)
+        
+        self.cutting_progress_label = tk.Label(
+            self.cutting_progress_frame,
+            text="Progress:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 8),
+        )
+        self.cutting_progress_label.pack(anchor="w")
+        
+        self.cutting_progress_bar = ttk.Progressbar(
+            self.cutting_progress_frame,
+            orient="horizontal",
+            length=300,
+            mode="determinate"
+        )
+        self.cutting_progress_bar.pack(fill=tk.X, pady=5)
+        
+        self.cutting_progress_frame.pack_forget()
+
+    def clear_content(self):
+        for widget in self.main_frame.winfo_children():
+            if widget != self.main_frame.winfo_children()[0]:
+                widget.destroy()
+
+    def select_excel_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Excel File",
+            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            self.excel_file_path = file_path
+            if hasattr(self, 'excel_label'):
+                self.excel_label.config(
+                    text=f"Excel File: {os.path.basename(file_path)}",
+                    fg="#FFFFFF"
+                )
+            else:
+                self.show_inventory()
+                self.excel_label.config(
+                    text=f"Excel File: {os.path.basename(file_path)}",
+                    fg="#FFFFFF"
+                )
+            self.check_all_selected()
+
+    def select_image_folder(self):
+        folder_path = filedialog.askdirectory(
+            title="Select Folder Containing Tree Images"
+        )
+        
+        if folder_path:
+            self.image_folder_path = folder_path
+            self.images_label.config(
+                text=f"Images Folder: {os.path.basename(folder_path)}",
+                fg="#FFFFFF"
+            )
+            self.check_all_selected()
+
+    def select_output_folder(self):
+        folder_path = filedialog.askdirectory(
+            title="Select Output Folder for Word Documents"
+        )
+        
+        if folder_path:
+            self.output_folder_path = folder_path
+            self.output_label.config(
+                text=f"Output Folder: {os.path.basename(folder_path)}",
+                fg="#FFFFFF"
+            )
+            self.check_all_selected()
+
+    def check_all_selected(self):
+        if (self.excel_file_path and self.image_folder_path and self.output_folder_path):
+            self.process_btn.config(state=tk.NORMAL)
+        else:
+            self.process_btn.config(state=tk.DISABLED)
+
+    def select_before_images(self):
+        folder_path = filedialog.askdirectory(
+            title="Select Folder Containing Before Images"
+        )
+        
+        if folder_path:
+            self.before_images_folder = folder_path
+            self.before_images_label.config(
+                text=f"Before Images: {os.path.basename(folder_path)}",
+                fg="#FFFFFF"
+            )
+            self.check_cutting_inputs()
+
+    def select_after_images(self):
+        folder_path = filedialog.askdirectory(
+            title="Select Folder Containing After Images"
+        )
+        
+        if folder_path:
+            self.after_images_folder = folder_path
+            self.after_images_label.config(
+                text=f"After Images: {os.path.basename(folder_path)}",
+                fg="#FFFFFF"
+            )
+            self.check_cutting_inputs()
+
+    def select_cutting_excel(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Cutting Excel File",
+            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            self.cutting_excel_file = file_path
+            self.cutting_excel_label.config(
+                text=f"Excel File: {os.path.basename(file_path)}",
+                fg="#FFFFFF"
+            )
+            self.check_cutting_inputs()
+
+    def select_cutting_output(self):
+        folder_path = filedialog.askdirectory(
+            title="Select Output Folder for Cutting Documents"
+        )
+        
+        if folder_path:
+            self.cutting_output_folder = folder_path
+            self.cutting_output_label.config(
+                text=f"Output Folder: {os.path.basename(folder_path)}",
+                fg="#FFFFFF"
+            )
+            self.check_cutting_inputs()
+
+    def check_cutting_inputs(self):
+        if (hasattr(self, 'before_images_folder') and
+            hasattr(self, 'after_images_folder') and
+            hasattr(self, 'cutting_excel_file') and
+            hasattr(self, 'cutting_output_folder')):
+            self.cutting_process_btn.config(state=tk.NORMAL)
+        else:
+            self.cutting_process_btn.config(state=tk.DISABLED)
+
+    def show_image_settings(self):
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Image Naming Settings")
+        settings_window.geometry("400x300")
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+        
+        settings_window.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + self.root.winfo_width() // 2 - 200,
+            self.root.winfo_rooty() + self.root.winfo_height() // 2 - 150
+        ))
+        
+        frame = tk.Frame(settings_window, bg="#1E1E1E", padx=20, pady=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        pattern_label = tk.Label(
+            frame, 
+            text="Select image naming pattern:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10, "bold"),
+            anchor="w"
+        )
+        pattern_label.pack(fill=tk.X, pady=(0, 10))
+        
+        self.pattern_var = tk.StringVar(value=self.image_pattern)
+        
+        patterns = [
+            ("Simple numbers (e.g., '123.jpg')", "simple_numbers"),
+            ("Tree prefix (e.g., 'T123.jpg', 'Tree123.jpg')", "tree_prefix"),
+            ("Alpha-numeric (e.g., 'A123.jpg', 'B001.jpg')", "alpha_numeric"),
+            ("Number with suffix (e.g., '123A.jpg', '001B.jpg')", "number_suffix"),
+            ("Auto-detect (slower but handles mixed formats)", "auto_detect")
+        ]
+        
+        for text, pattern in patterns:
+            rb = tk.Radiobutton(
+                frame,
+                text=text,
+                variable=self.pattern_var,
+                value=pattern,
+                bg="#1E1E1E",
+                fg="#FFFFFF",
+                selectcolor="#2A2A2A",
+                activebackground="#2A2A2A",
+                activeforeground="#FFFFFF"
+            )
+            rb.pack(anchor="w", pady=2)
+        
+        options_frame = tk.Frame(frame, bg="#1E1E1E", pady=10)
+        options_frame.pack(fill=tk.X)
+        
+        self.use_subfolders_var = tk.BooleanVar(value=self.use_subfolders)
+        subfolder_cb = tk.Checkbutton(
+            options_frame,
+            text="Search in subfolders (slower)",
+            variable=self.use_subfolders_var,
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            selectcolor="#2A2A2A",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF"
+        )
+        subfolder_cb.pack(anchor="w")
+        
+        button_frame = tk.Frame(frame, bg="#1E1E1E", pady=10)
+        button_frame.pack(fill=tk.X)
+        
+        save_btn = tk.Button(
+            button_frame,
+            text="Save Settings",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=lambda: self.save_image_settings(settings_window)
+        )
+        save_btn.pack(side=tk.RIGHT, padx=5)
+        
+        cancel_btn = tk.Button(
+            button_frame,
+            text="Cancel",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=settings_window.destroy
+        )
+        cancel_btn.pack(side=tk.RIGHT, padx=5)
+
+    def save_image_settings(self, window):
+        self.image_pattern = self.pattern_var.get()
+        self.use_subfolders = self.use_subfolders_var.get()
+        
+        self.image_cache = {}
+        
+        window.destroy()
+        
+        if hasattr(self, 'settings_label'):
+            pattern_name = next((name for name, val in [
+                ("Simple numbers", "simple_numbers"),
+                ("Tree prefix", "tree_prefix"),
+                ("Alpha-numeric", "alpha_numeric"),
+                ("Number with suffix", "number_suffix"),
+                ("Auto-detect", "auto_detect")
+            ] if val == self.image_pattern), "Unknown")
+            
+            self.settings_label.config(
+                text=f"Pattern: {pattern_name} | Subfolders: {'Yes' if self.use_subfolders else 'No'}",
+                fg="#FFFFFF"
+            )
+
+    def process_data(self):
+        try:
+            try:
+                self.start_row = int(self.start_row_var.get())
+                if self.start_row < 2:
+                    raise ValueError("Start row must be 2 or greater (row 1 is header)")
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Start row must be a valid number (2 or greater)")
+                return
+            
+            try:
+                self.batch_size = int(self.batch_size_var.get())
+                if self.batch_size < 1:
+                    raise ValueError("Batch size must be at least 1")
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Batch size must be a valid number (1 or greater)")
+                return
+            
+            if self.num_batches_var.get().strip().lower() == "all":
+                self.num_batches_to_process = None
+            else:
+                try:
+                    self.num_batches_to_process = int(self.num_batches_var.get())
+                    if self.num_batches_to_process < 1:
+                        raise ValueError("Number of batches must be at least 1")
+                except ValueError:
+                    messagebox.showerror("Invalid Input", "Batches to process must be 'All' or a valid number")
+                    return
+            
+            self.progress_frame.pack(fill=tk.X, pady=10)
+            self.progress_bar["value"] = 0
+            self.root.update()
+            
+            self.progress_label.config(text="Loading Excel data...")
+            self.root.update()
+            
+            try:
+                df = pd.read_excel(
+                    self.excel_file_path, 
+                    usecols=['TREE NUMBER', 'SPECIES'],
+                    dtype={'TREE NUMBER': str, 'SPECIES': str}
+                )
+            except ValueError:
+                try:
+                    df = pd.read_excel(
+                        self.excel_file_path, 
+                        usecols=['Tree Number', 'Species'],
+                        dtype={'Tree Number': str, 'Species': str}
+                    )
+                    df.rename(columns={'Tree Number': 'TREE NUMBER', 'Species': 'SPECIES'}, inplace=True)
+                except ValueError:
+                    df = pd.read_excel(self.excel_file_path)
+                    
+                    columns_to_check = [
+                        ('TREE NUMBER', 'Tree Number', df.columns[5] if len(df.columns) >= 6 else None),
+                        ('SPECIES', 'Species', df.columns[6] if len(df.columns) >= 7 else None)
+                    ]
+                    
+                    for target_col, alt_col, fallback_col in columns_to_check:
+                        if target_col in df.columns:
+                            pass
+                        elif alt_col in df.columns:
+                            df.rename(columns={alt_col: target_col}, inplace=True)
+                        elif fallback_col is not None:
+                            df.rename(columns={fallback_col: target_col}, inplace=True)
+                        else:
+                            messagebox.showerror(
+                                "Column Error", 
+                                f"Could not find required column: {target_col}"
+                            )
+                            self.progress_frame.pack_forget()
+                            return
+            
+            df = df[['TREE NUMBER', 'SPECIES']].copy()
+            
+            if self.start_row > 2:
+                start_index = self.start_row - 2
+                df = df.iloc[start_index:].reset_index(drop=True)
+            
+            self.progress_label.config(text="Loading images...")
+            self.root.update()
+            
+            self.load_image_cache()
+            
+            total_rows = len(df)
+            num_batches = (total_rows + self.batch_size - 1) // self.batch_size
+            
+            if self.num_batches_to_process is not None:
+                num_batches = min(num_batches, self.num_batches_to_process)
+            
+            self.progress_bar["maximum"] = num_batches
+            
+            if not hasattr(self, 'match_cache'):
+                self.match_cache = {}
+            if not hasattr(self, 'image_size_cache'):
+                self.image_size_cache = {}
+            
+            for batch_num in range(num_batches):
+                self.progress_label.config(text=f"Processing batch {batch_num + 1} of {num_batches}...")
+                self.progress_bar["value"] = batch_num
+                self.root.update()
+                
+                batch_start = batch_num * self.batch_size
+                batch_end = min((batch_num + 1) * self.batch_size, total_rows)
+                
+                batch_df = df.iloc[batch_start:batch_end].copy()
+                
+                self.generate_word_doc(batch_df, batch_num + 1, num_batches)
+                
+                self.progress_bar["value"] = batch_num + 1
+                self.root.update()
+                
+                if batch_num % 5 == 0:
+                    self.match_cache.clear()
+                    if len(self.image_size_cache) > 100:
+                        self.image_size_cache.clear()
+                    
+                    import gc
+                    gc.collect()
+            
+            if hasattr(self, 'match_cache'):
+                self.match_cache.clear()
+            if hasattr(self, 'image_size_cache'):
+                self.image_size_cache.clear()
+                
+            temp_dir = os.path.join(self.output_folder_path, 'temp_images')
+            if os.path.exists(temp_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir)
+                except:
+                    pass
+            
+            self.progress_frame.pack_forget()
+            messagebox.showinfo(
+                "Processing Complete", 
+                f"Generated {num_batches} Word documents in {self.output_folder_path}"
+            )
+            
+        except Exception as e:
+            self.progress_frame.pack_forget()
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def process_cutting_data(self):
+        try:
+            start_row = 2
+            try:
+                start_row = int(self.cutting_start_row_var.get())
+                if start_row < 2:
+                    raise ValueError("Start row must be 2 or greater (row 1 is header)")
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Start row must be a valid number (2 or greater)")
+                return
+            
+            batch_size = 100
+            try:
+                batch_size = int(self.cutting_batch_size_var.get())
+                if batch_size < 1:
+                    raise ValueError("Batch size must be at least 1")
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Batch size must be a valid number (1 or greater)")
+                return
+            
+            self.cutting_progress_frame.pack(fill=tk.X, pady=10)
+            self.cutting_progress_bar["value"] = 0
+            self.root.update()
+            
+            self.cutting_progress_label.config(text="Loading Excel data...")
+            self.root.update()
+            
+            try:
+                df = pd.read_excel(
+                    self.cutting_excel_file,
+                    dtype={
+                        'TREE NUMBER': str, 
+                        'SPECIES': str,
+                        'CUTTING DATE': str,
+                        'NOTES': str
+                    }
+                )
+            except ValueError:
+                try:
+                    df = pd.read_excel(
+                        self.cutting_excel_file,
+                        dtype={
+                            'Tree Number': str, 
+                            'Species': str,
+                            'Cutting Date': str,
+                            'Notes': str
+                        }
+                    )
+                    df.rename(columns={
+                        'Tree Number': 'TREE NUMBER', 
+                        'Species': 'SPECIES',
+                        'Cutting Date': 'CUTTING DATE',
+                        'Notes': 'NOTES'
+                    }, inplace=True)
+                except ValueError:
+                    df = pd.read_excel(self.cutting_excel_file)
+                    
+                    columns_map = {}
+                    for col in df.columns:
+                        col_lower = col.lower()
+                        if 'tree' in col_lower and 'number' in col_lower:
+                            columns_map[col] = 'TREE NUMBER'
+                        elif 'species' in col_lower:
+                            columns_map[col] = 'SPECIES'
+                        elif 'cutting' in col_lower and ('date' in col_lower or 'time' in col_lower):
+                            columns_map[col] = 'CUTTING DATE'
+                        elif 'note' in col_lower or 'description' in col_lower or 'comment' in col_lower:
+                            columns_map[col] = 'NOTES'
+                    
+                    required_cols = ['TREE NUMBER', 'SPECIES']
+                    missing_cols = [col for col in required_cols if col not in columns_map.values()]
+                    
+                    if missing_cols:
+                        messagebox.showerror(
+                            "Column Error",
+                            f"Could not find required columns: {', '.join(missing_cols)}"
+                        )
+                        self.cutting_progress_frame.pack_forget()
+                        return
+                    
+                    df.rename(columns=columns_map, inplace=True)
+            
+            required_cols = ['TREE NUMBER', 'SPECIES']
+            for col in required_cols:
+                if col not in df.columns:
+                    messagebox.showerror(
+                        "Missing Column", 
+                        f"Required column not found: {col}"
+                    )
+                    self.cutting_progress_frame.pack_forget()
+                    return
+            
+            if 'CUTTING DATE' not in df.columns:
+                df['CUTTING DATE'] = ''
+            if 'NOTES' not in df.columns:
+                df['NOTES'] = ''
+            
+            df = df[['TREE NUMBER', 'SPECIES', 'CUTTING DATE', 'NOTES']].copy()
+            
+            if start_row > 2:
+                df = df.iloc[start_row-2:].reset_index(drop=True)
+            
+            total_rows = len(df)
+            num_batches = math.ceil(total_rows / batch_size)
+            
+            self.cutting_progress_bar["maximum"] = num_batches
+            
+            self.cutting_progress_label.config(text="Indexing images...")
+            self.root.update()
+            
+            before_images = self.load_cutting_images(self.before_images_folder)
+            after_images = self.load_cutting_images(self.after_images_folder)
+            
+            for batch_num in range(num_batches):
+                self.cutting_progress_label.config(text=f"Processing batch {batch_num + 1} of {num_batches}...")
+                self.cutting_progress_bar["value"] = batch_num
+                self.root.update()
+                
+                batch_start = batch_num * batch_size
+                batch_end = min((batch_num + 1) * batch_size, total_rows)
+                
+                batch_df = df.iloc[batch_start:batch_end].copy()
+                
+                self.generate_cutting_doc(batch_df, batch_num + 1, num_batches, before_images, after_images)
+                
+                self.cutting_progress_bar["value"] = batch_num + 1
+                self.root.update()
+            
+            self.cutting_progress_frame.pack_forget()
+            messagebox.showinfo(
+                "Processing Complete", 
+                f"Generated {num_batches} cutting documents in {self.cutting_output_folder}"
+            )
+            
+        except Exception as e:
+            self.cutting_progress_frame.pack_forget()
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def load_image_cache(self):
+        self.image_cache = {}
+        
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff']
+        all_files = []
+        
+        image_extensions_set = set(image_extensions)
+        
+        if self.use_subfolders:
+            for root, dirs, files in os.walk(self.image_folder_path):
+                for file in files:
+                    ext = os.path.splitext(file.lower())[1]
+                    if ext in image_extensions_set:
+                        all_files.append(os.path.join(root, file))
+        else:
+            for file in os.listdir(self.image_folder_path):
+                ext = os.path.splitext(file.lower())[1]
+                if ext in image_extensions_set:
+                    all_files.append(os.path.join(self.image_folder_path, file))
+        
+        total_files = len(all_files)
+        if total_files > 0:
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Loading Images")
+            progress_window.geometry("300x80")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            progress_window.geometry("+%d+%d" % (
+                self.root.winfo_rootx() + self.root.winfo_width() // 2 - 150,
+                self.root.winfo_rooty() + self.root.winfo_height() // 2 - 40
+            ))
+            
+            progress_label = tk.Label(
+                progress_window,
+                text=f"Indexing image files (0/{total_files})...",
+                font=("Arial", 10)
+            )
+            progress_label.pack(pady=5)
+            
+            image_progress = ttk.Progressbar(
+                progress_window,
+                orient="horizontal",
+                length=280,
+                mode="determinate",
+                maximum=total_files
+            )
+            image_progress.pack(pady=5, padx=10)
+            
+            pattern_type = self.image_pattern
+            
+            patterns = {}
+            if pattern_type == "simple_numbers" or pattern_type == "auto_detect":
+                patterns['num'] = re.compile(r'(?:^|[^a-zA-Z0-9])(\d+)(?:[^a-zA-Z0-9]|$)')
+            if pattern_type == "tree_prefix" or pattern_type == "auto_detect":
+                patterns['tree'] = re.compile(r'(?:^|[^a-zA-Z])([Tt](?:ree)?)[- _]?(\d+)')
+            if pattern_type == "alpha_numeric" or pattern_type == "auto_detect":
+                patterns['alpha'] = re.compile(r'([a-zA-Z]+)[- _]?(\d+)')
+            if pattern_type == "number_suffix" or pattern_type == "auto_detect":
+                patterns['num_suffix'] = re.compile(r'(\d+)[- _]?([a-zA-Z]+)')
+            if pattern_type == "auto_detect":
+                patterns['all_nums'] = re.compile(r'\d+')
+            
+            batch_size = 200
+            for i in range(0, total_files, batch_size):
+                batch_end = min(i + batch_size, total_files)
+                current_batch = all_files[i:batch_end]
+                
+                progress_label.config(text=f"Indexing image files ({i+1}/{total_files})...")
+                image_progress["value"] = i + 1
+                progress_window.update()
+                
+                for file_path in current_batch:
+                    filename = os.path.basename(file_path)
+                    name_without_ext = os.path.splitext(filename)[0]
+                    
+                    self.image_cache[f"file_{name_without_ext.lower()}"] = file_path
+                    
+                    if pattern_type == "simple_numbers" or pattern_type == "auto_detect":
+                        self._process_simple_numbers(file_path, name_without_ext, patterns)
+                    elif pattern_type == "tree_prefix":
+                        self._process_tree_prefix(file_path, name_without_ext, patterns)
+                    elif pattern_type == "alpha_numeric":
+                        self._process_alpha_numeric(file_path, name_without_ext, patterns)
+                    elif pattern_type == "number_suffix":
+                        self._process_number_suffix(file_path, name_without_ext, patterns)
+                
+                image_progress["value"] = batch_end
+                progress_window.update()
+            
+            progress_window.destroy()
+
+    def _process_simple_numbers(self, file_path, name, patterns):
+        matches = patterns['num'].finditer(name)
+        for match in matches:
+            num_str = match.group(1)
+            try:
+                num_val = int(num_str)
+                self.image_cache[f"num_{num_val}"] = file_path
+                if len(num_str) > 1 and num_str.startswith('0'):
+                    self.image_cache[f"raw_{num_val}"] = file_path
+            except ValueError:
+                pass
+    
+    def _process_tree_prefix(self, file_path, name, patterns):
+        matches = patterns['tree'].finditer(name)
+        for match in matches:
+            try:
+                num_val = int(match.group(2))
+                self.image_cache[f"tree_{num_val}"] = file_path
+            except ValueError:
+                pass
+    
+    def _process_alpha_numeric(self, file_path, name, patterns):
+        matches = patterns['alpha'].finditer(name)
+        for match in matches:
+            prefix = match.group(1).lower()
+            try:
+                num_val = int(match.group(2))
+                self.image_cache[f"alpha_{prefix}_{num_val}"] = file_path
+            except ValueError:
+                pass
+    
+    def _process_number_suffix(self, file_path, name, patterns):
+        matches = patterns['num_suffix'].finditer(name)
+        for match in matches:
+            try:
+                num_val = int(match.group(1))
+                suffix = match.group(2).lower()
+                self.image_cache[f"numsuf_{num_val}_{suffix}"] = file_path
+                self.image_cache[f"numsuf_{num_val}"] = file_path
+            except ValueError:
+                pass
+
+    def get_image_path(self, tree_number):
+        if not tree_number or pd.isna(tree_number):
+            return None
+        
+        try:
+            tree_num_str = str(tree_number).strip()
+            
+            if hasattr(self, 'match_cache') and tree_num_str in self.match_cache:
+                return self.match_cache[tree_num_str]
+            
+            if not hasattr(self, 'match_cache'):
+                self.match_cache = {}
+                
+            pattern_type = self.image_pattern
+            result = None
+            
+            tree_num_lower = tree_num_str.lower()
+            if f"file_{tree_num_lower}" in self.image_cache:
+                result = self.image_cache[f"file_{tree_num_lower}"]
+            
+            if not result:
+                try:
+                    numeric_tree_num = int(tree_num_str)
+                    
+                    if pattern_type == "simple_numbers" or pattern_type == "auto_detect":
+                        if f"num_{numeric_tree_num}" in self.image_cache:
+                            result = self.image_cache[f"num_{numeric_tree_num}"]
+                        elif f"raw_{numeric_tree_num}" in self.image_cache:
+                            result = self.image_cache[f"raw_{numeric_tree_num}"]
+                    
+                    if not result and (pattern_type == "tree_prefix" or pattern_type == "auto_detect"):
+                        if f"tree_{numeric_tree_num}" in self.image_cache:
+                            result = self.image_cache[f"tree_{numeric_tree_num}"]
+                            
+                    if not result and pattern_type == "auto_detect":
+                        if f"any_{numeric_tree_num}" in self.image_cache:
+                            result = self.image_cache[f"any_{numeric_tree_num}"]
+                        elif f"numsuf_{numeric_tree_num}" in self.image_cache:
+                            result = self.image_cache[f"numsuf_{numeric_tree_num}"]
+                except ValueError:
+                    pass
+            
+            if not result:
+                if pattern_type in ["alpha_numeric", "auto_detect"]:
+                    match = re.match(r'^([a-zA-Z]+)[- _]?(\d+)$', tree_num_str)
+                    if match:
+                        prefix = match.group(1).lower()
+                        try:
+                            num_val = int(match.group(2))
+                            if f"alpha_{prefix}_{num_val}" in self.image_cache:
+                                result = self.image_cache[f"alpha_{prefix}_{num_val}"]
+                        except ValueError:
+                            pass
+                
+                if not result and pattern_type in ["number_suffix", "auto_detect"]:
+                    match = re.match(r'^(\d+)[- _]?([a-zA-Z]+)$', tree_num_str)
+                    if match:
+                        try:
+                            num_val = int(match.group(1))
+                            suffix = match.group(2).lower()
+                            if f"numsuf_{num_val}_{suffix}" in self.image_cache:
+                                result = self.image_cache[f"numsuf_{num_val}_{suffix}"]
+                        except ValueError:
+                            pass
+            
+            self.match_cache[tree_num_str] = result
+            return result
+            
+        except Exception as e:
+            print(f"Error matching tree {tree_number}: {str(e)}")
+            return None
+
+    def optimize_image_for_word(self, image_path, max_width=1024, max_height=768):
+        try:
+            if not hasattr(self, 'image_size_cache'):
+                self.image_size_cache = {}
+                
+            if image_path in self.image_size_cache:
+                return self.image_size_cache[image_path]
+                
+            with Image.open(image_path) as img:
+                if img.width > max_width or img.height > max_height:
+                    ratio = min(max_width/img.width, max_height/img.height)
+                    new_width = int(img.width * ratio)
+                    new_height = int(img.height * ratio)
+                    
+                    temp_dir = os.path.join(self.output_folder_path, 'temp_images')
+                    if not os.path.exists(temp_dir):
+                        os.makedirs(temp_dir)
+                        
+                    file_name = os.path.basename(image_path)
+                    temp_path = os.path.join(temp_dir, f"opt_{file_name}")
+                    
+                    if not os.path.exists(temp_path):
+                        img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        img_resized.save(temp_path, quality=85, optimize=True)
+                    
+                    self.image_size_cache[image_path] = temp_path
+                    return temp_path
+                else:
+                    self.image_size_cache[image_path] = image_path
+                    return image_path
+                    
+        except Exception as e:
+            print(f"Error optimizing image {image_path}: {str(e)}")
+            return image_path
+
+    def generate_word_doc(self, batch_df, batch_num, total_batches):
+        doc = Document()
+        
+        for section in doc.sections:
+            section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(0.5)
+        
+        actual_rows = len(batch_df)
+        trees_per_column = (actual_rows + 1) // 2
+        table_rows = trees_per_column * 2
+        
+        table = doc.add_table(rows=table_rows, cols=2)
+        table.style = 'Table Grid'
+        
+        for col in table.columns:
+            for cell in col.cells:
+                cell.width = Inches(3.25)
+        
+        for i in range(table_rows):
+            table.rows[i].height = Inches(2.5 if i % 2 == 0 else 0.4)
+        
+        arial_11_bold = {'name': 'Arial', 'size': Pt(11), 'bold': True}
+        
+        chunk_size = 10
+        for chunk_start in range(0, actual_rows, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, actual_rows)
+            
+            for tree_index in range(chunk_start, chunk_end):
+                tree_row = batch_df.iloc[tree_index]
+                tree_number = str(tree_row['TREE NUMBER'])
+                species = str(tree_row['SPECIES']).upper()
+                
+                row_index = tree_index // 2 * 2
+                col_index = tree_index % 2
+                
+                image_cell = table.cell(row_index, col_index)
+                image_para = image_cell.paragraphs[0]
+                image_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                image_path = self.get_image_path(tree_number)
+                
+                if image_path and os.path.exists(image_path):
+                    try:
+                        optimized_path = self.optimize_image_for_word(image_path)
+                        run = image_para.add_run()
+                        run.add_picture(optimized_path, width=Inches(3.23), height=Inches(2.43))
+                    except Exception as e:
+                        image_para.text = f"[No image found for Tree {tree_number}]"
+                        for run in image_para.runs:
+                            run.italic = True
+                else:
+                    image_para.text = f"[No image found for Tree {tree_number}]"
+                    for run in image_para.runs:
+                        run.italic = True
+                
+                text_cell = table.cell(row_index + 1, col_index)
+                text_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                
+                p = text_cell.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                p.space_after = p.space_before = Pt(0)
+                
+                text_content = f"TREE NUMBER : {tree_number}\nSPECIES      : {species}"
+                tree_run = p.add_run(text_content)
+                tree_run.font.name = arial_11_bold['name']
+                tree_run.font.size = arial_11_bold['size']
+                tree_run.font.bold = arial_11_bold['bold']
+        
+        if hasattr(self, 'match_cache'):
+            self.match_cache.clear()
+        
+        file_name = os.path.join(
+            self.output_folder_path, 
+            f"TreeData_Batch{batch_num}_of_{total_batches}.docx"
+        )
+        doc.save(file_name)
+        
+        if batch_num % 5 == 0 and hasattr(self, 'image_size_cache'):
+            self.image_size_cache.clear()
+
+    def load_cutting_images(self, folder_path):
+        image_cache = {}
+        
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff']
+        image_extensions_set = set(image_extensions)
+        
+        all_files = []
+        
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                ext = os.path.splitext(file.lower())[1]
+                if ext in image_extensions_set:
+                    all_files.append(os.path.join(root, file))
+        
+        for file_path in all_files:
+            filename = os.path.basename(file_path)
+            name_without_ext = os.path.splitext(filename)[0]
+            
+            image_cache[name_without_ext.lower()] = file_path
+            
+            matches = re.findall(r'\d+', name_without_ext)
+            for match in matches:
+                try:
+                    num_val = int(match)
+                    image_cache[f"num_{num_val}"] = file_path
+                    
+                    if re.search(r'^[tT](?:ree)?[- _]?\d+', name_without_ext):
+                        image_cache[f"tree_{num_val}"] = file_path
+                    
+                    alpha_match = re.search(r'^([a-zA-Z]+)[- _]?(\d+)', name_without_ext)
+                    if alpha_match:
+                        prefix = alpha_match.group(1).lower()
+                        alpha_num = int(alpha_match.group(2))
+                        image_cache[f"alpha_{prefix}_{alpha_num}"] = file_path
+                except ValueError:
+                    pass
+        
+        return image_cache
+
+    def generate_cutting_doc(self, batch_df, batch_num, total_batches, before_images, after_images):
+        doc = Document()
+        
+        for section in doc.sections:
+            section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(0.5)
+        
+        title = doc.add_paragraph("Tree Cutting Report")
+        title_format = title.paragraph_format
+        title_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title.runs[0]
+        title_run.font.name = 'Arial'
+        title_run.font.size = Pt(16)
+        title_run.font.bold = True
+        
+        date_paragraph = doc.add_paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d')}")
+        date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        date_run = date_paragraph.runs[0]
+        date_run.font.name = 'Arial'
+        date_run.font.size = Pt(10)
+        date_run.italic = True
+        
+        doc.add_paragraph()
+        
+        for _, tree_row in batch_df.iterrows():
+            tree_number = str(tree_row['TREE NUMBER'])
+            species = str(tree_row['SPECIES']).upper()
+            cutting_date = str(tree_row.get('CUTTING DATE', ''))
+            notes = str(tree_row.get('NOTES', ''))
+            
+            tree_info = doc.add_paragraph()
+            tree_info.add_run(f"Tree Number: {tree_number}").bold = True
+            tree_info.add_run(f"\nSpecies: {species}")
+            
+            if cutting_date and cutting_date.lower() != 'nan':
+                tree_info.add_run(f"\nCutting Date: {cutting_date}")
+                
+            if notes and notes.lower() != 'nan':
+                tree_info.add_run(f"\nNotes: {notes}")
+            
+            table = doc.add_table(rows=2, cols=2)
+            table.style = 'Table Grid'
+            
+            for col in table.columns:
+                for cell in col.cells:
+                    cell.width = Inches(3.25)
+            
+            before_header = table.cell(0, 0)
+            before_header.text = "BEFORE"
+            before_header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in before_header.paragraphs[0].runs:
+                run.font.bold = True
+                
+            after_header = table.cell(0, 1)
+            after_header.text = "AFTER"
+            after_header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in after_header.paragraphs[0].runs:
+                run.font.bold = True
+            
+            before_cell = table.cell(1, 0)
+            before_para = before_cell.paragraphs[0]
+            before_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            after_cell = table.cell(1, 1)
+            after_para = after_cell.paragraphs[0]
+            after_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            before_image_path = self.find_cutting_image(tree_number, before_images)
+            if before_image_path:
+                try:
+                    optimized_path = self.optimize_image_for_word(before_image_path)
+                    before_para.add_run().add_picture(optimized_path, width=Inches(3.2))
+                except Exception as e:
+                    before_para.text = "[Before image not found]"
+                    for run in before_para.runs:
+                        run.italic = True
+            else:
+                before_para.text = "[Before image not found]"
+                for run in before_para.runs:
+                    run.italic = True
+            
+            after_image_path = self.find_cutting_image(tree_number, after_images)
+            if after_image_path:
+                try:
+                    optimized_path = self.optimize_image_for_word(after_image_path)
+                    after_para.add_run().add_picture(optimized_path, width=Inches(3.2))
+                except Exception as e:
+                    after_para.text = "[After image not found]"
+                    for run in after_para.runs:
+                        run.italic = True
+            else:
+                after_para.text = "[After image not found]"
+                for run in after_para.runs:
+                    run.italic = True
+            
+            doc.add_paragraph()
+        
+        file_name = os.path.join(
+            self.cutting_output_folder, 
+            f"TreeCutting_Batch{batch_num}_of_{total_batches}.docx"
+        )
+        doc.save(file_name)
+
+    def find_cutting_image(self, tree_number, image_cache):
+        if not tree_number or pd.isna(tree_number):
+            return None
+        
+        try:
+            tree_num_str = str(tree_number).strip()
+            tree_num_lower = tree_num_str.lower()
+            
+            if tree_num_lower in image_cache:
+                return image_cache[tree_num_lower]
+            
+            try:
+                numeric_tree_num = int(tree_num_str)
+                
+                if f"num_{numeric_tree_num}" in image_cache:
+                    return image_cache[f"num_{numeric_tree_num}"]
+                    
+                if f"tree_{numeric_tree_num}" in image_cache:
+                    return image_cache[f"tree_{numeric_tree_num}"]
+                    
+                for key in image_cache:
+                    if key.startswith(f"alpha_") and key.endswith(f"_{numeric_tree_num}"):
+                        return image_cache[key]
+                        
+            except ValueError:
+                pass
+                
+            alpha_match = re.match(r'^([a-zA-Z]+)[- _]?(\d+)$', tree_num_str)
+            if alpha_match:
+                prefix = alpha_match.group(1).lower()
+                try:
+                    num_val = int(alpha_match.group(2))
+                    if f"alpha_{prefix}_{num_val}" in image_cache:
+                        return image_cache[f"alpha_{prefix}_{num_val}"]
+                except ValueError:
+                    pass
+                    
+            for key, path in image_cache.items():
+                if not key.startswith(("num_", "tree_", "alpha_")):
+                    if tree_num_lower in key:
+                        return path
+                    
+            return None
+        except Exception as e:
+            print(f"Error finding cutting image for tree {tree_number}: {str(e)}")
+            return None
+
+    def update_ui(self, func):
+        self.root.after(0, func)
+
+    def run_in_background(self, func, callback=None):
+        def _worker():
+            result = None
+            error = None
+            try:
+                result = func()
+            except Exception as e:
+                error = e
+            
+            if callback:
+                self.update_ui(lambda: callback(result, error))
+        
+        thread = threading.Thread(target=_worker)
+        thread.daemon = True
+        thread.start()
+        return thread
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = TreeInventoryApp(root)
+    root.mainloop()
