@@ -26,8 +26,8 @@ class TreeInventoryApp:
         self.main_frame = tk.Frame(root, bg="#1E1E1E")
         self.main_frame.place(relx=0.05, rely=0.05, relwidth=0.9, relheight=0.9)
         
-        self.create_header()
         self.create_content()
+        self.create_footer()
         
         self.excel_file_path = None
         self.image_folder_path = None
@@ -42,64 +42,152 @@ class TreeInventoryApp:
         self.image_cache = {}
         self.pattern_stats = {}
 
-    def create_header(self):
-        header_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
-        header_frame.place(relx=0.5, rely=0.05, relwidth=0.9, relheight=0.1, anchor="n")
-        
-        self.inventory_btn = tk.Button(
-            header_frame, 
-            text="INVENTORY", 
-            bg="#1E1E1E", 
-            fg="#FFC107",
-            activebackground="#2A2A2A",
-            activeforeground="#FFC107",
-            bd=0,
-            font=("Arial", 10, "bold"),
-            command=self.show_inventory
-        )
-        self.inventory_btn.pack(side=tk.LEFT, padx=10)
-        
-        self.cutting_btn = tk.Button(
-            header_frame, 
-            text="CUTTING", 
-            bg="#1E1E1E", 
-            fg="#FFFFFF",
-            activebackground="#2A2A2A",
-            activeforeground="#FFC107",
-            bd=0,
-            font=("Arial", 10, "bold"),
-            command=self.show_cutting
-        )
-        self.cutting_btn.pack(side=tk.LEFT, padx=10)
-
     def create_content(self):
         content_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
         content_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
         
-        self.excel_btn = tk.Button(
+        system_label = tk.Label(
             content_frame,
-            text="INSERT EXCEL FILE",
+            text="Tree Inventory - Tree Cutting Terminal Report Creator",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 16, "bold"),
+            wraplength=500,
+            justify="center"
+        )
+        system_label.place(relx=0.5, rely=0.3, anchor="center")
+        
+        self.inventory_btn = tk.Button(
+            content_frame,
+            text="INVENTORY",
             bg="#1E1E1E",
             fg="#FFFFFF",
             activebackground="#2A2A2A",
             activeforeground="#FFFFFF",
             bd=1,
             relief=tk.SOLID,
-            font=("Arial", 10, "bold"),
-            width=20,
+            font=("Arial", 12, "bold"),
+            width=15,
             height=2,
-            command=self.select_excel_file
+            command=self.show_inventory
         )
-        self.excel_btn.place(relx=0.5, rely=0.5, anchor="center")
+        self.inventory_btn.place(relx=0.3, rely=0.6, anchor="center")
+        
+        self.cutting_btn = tk.Button(
+            content_frame,
+            text="CUTTING",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 12, "bold"),
+            width=15,
+            height=2,
+            command=self.show_cutting
+        )
+        self.cutting_btn.place(relx=0.7, rely=0.6, anchor="center")
+
+    def create_footer(self):
+        self.footer_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
+        self.footer_frame.place(relx=0.5, rely=0.95, relwidth=0.9, relheight=0.05, anchor="s")
+        
+        version_label = tk.Label(
+            self.footer_frame,
+            text="Tree Inventory - Tree Cutting Terminal Report v1.0 | Created by Ron Michael Comia | © 2025",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8),
+            anchor="w"
+        )
+        version_label.pack(side=tk.LEFT)
+        
+        help_label = tk.Label(
+            self.footer_frame,
+            text="Help & Support",
+            bg="#1E1E1E",
+            fg="#FFC107",
+            font=("Arial", 8, "underline"),
+            cursor="hand2"
+        )
+        help_label.pack(side=tk.RIGHT)
+        help_label.bind("<Button-1>", lambda e: self.show_help())
+
+    def reset_button_colors(self):
+        self.inventory_btn.config(fg="#FFFFFF")
+        self.cutting_btn.config(fg="#FFFFFF")
+
+    def show_initial(self):
+        self.clear_content()
+        self.create_content()
+        self.reset_button_colors()
+
+    def show_help(self):
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Help & Support")
+        help_window.geometry("400x300")
+        help_window.configure(bg="#1E1E1E")
+        help_window.transient(self.root)
+        help_window.grab_set()
+        
+        help_window.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + self.root.winfo_width() // 2 - 200,
+            self.root.winfo_rooty() + self.root.winfo_height() // 2 - 150
+        ))
+        
+        help_text = tk.Label(
+            help_window,
+            text="Tree Inventory - Tree Cutting Terminal Report\n\n"
+                 "1. Select Excel file with tree data\n"
+                 "2. Choose image folder\n"
+                 "3. Set output folder\n"
+                 "4. Configure settings as needed\n"
+                 "5. Click 'Generate Word Documents'\n\n"
+                 "For issues, contact ronm.comia@gmail.com",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            justify=tk.LEFT,
+            wraplength=360
+        )
+        help_text.pack(pady=20, padx=20)
+        
+        close_btn = tk.Button(
+            help_window,
+            text="Close",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            activebackground="#2A2A2A",
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=help_window.destroy
+        )
+        close_btn.pack(pady=10)
 
     def show_inventory(self):
         self.inventory_btn.config(fg="#FFC107")
         self.cutting_btn.config(fg="#FFFFFF")
-        
         self.clear_content()
         
         inventory_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
         inventory_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        
+        back_btn = tk.Button(
+            inventory_frame,
+            text="Back",
+            bg="#1E1E1E",
+            fg="#FFC107",
+            activebackground="#2A2A2A",
+            activeforeground="#FFC107",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.show_initial
+        )
+        back_btn.pack(pady=5, anchor="w")
         
         select_excel_btn = tk.Button(
             inventory_frame,
@@ -333,13 +421,26 @@ class TreeInventoryApp:
         self.progress_frame.pack_forget()
 
     def show_cutting(self):
-        self.inventory_btn.config(fg="#696969")
         self.cutting_btn.config(fg="#FFC107")
-        
+        self.inventory_btn.config(fg="#FFFFFF")
         self.clear_content()
         
         cutting_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
         cutting_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        
+        back_btn = tk.Button(
+            cutting_frame,
+            text="Back",
+            bg="#1E1E1E",
+            fg="#FFC107",
+            activebackground="#2A2A2A",
+            activeforeground="#FFC107",
+            bd=1,
+            relief=tk.SOLID,
+            font=("Arial", 10),
+            command=self.show_initial
+        )
+        back_btn.pack(pady=5, anchor="w")
         
         select_before_btn = tk.Button(
             cutting_frame,
@@ -532,7 +633,7 @@ class TreeInventoryApp:
 
     def clear_content(self):
         for widget in self.main_frame.winfo_children():
-            if widget != self.main_frame.winfo_children()[0]:
+            if widget != self.footer_frame:
                 widget.destroy()
 
     def select_excel_file(self):
@@ -965,7 +1066,7 @@ class TreeInventoryApp:
                         'Tree Number': 'TREE NUMBER', 
                         'Species': 'SPECIES',
                         'Cutting Date': 'CUTTING DATE',
-                        'Notes': 'NOTES'
+                        'Notes': 'Notes'
                     }, inplace=True)
                 except ValueError:
                     df = pd.read_excel(self.cutting_excel_file)
@@ -988,7 +1089,7 @@ class TreeInventoryApp:
                     if missing_cols:
                         messagebox.showerror(
                             "Column Error",
-                            f"Could not find required columns: {', '.join(missing_cols)}"
+                            f"Could not find required columns: { ', '.join(missing_cols)}"
                         )
                         self.cutting_progress_frame.pack_forget()
                         return
