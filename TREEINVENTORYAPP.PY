@@ -13,6 +13,40 @@ import re
 import threading
 import math
 from datetime import datetime
+from fuzzywuzzy import fuzz
+
+class Tooltip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip_window = None
+        self.widget.bind("<Enter>", self.show_tooltip)
+        self.widget.bind("<Leave>", self.hide_tooltip)
+
+    def show_tooltip(self, event=None):
+        if self.tooltip_window:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            tw,
+            text=self.text,
+            background="#FFFFDD",
+            foreground="#000000",
+            relief="solid",
+            borderwidth=1,
+            font=("Arial", 8),
+            wraplength=400
+        )
+        label.pack()
+
+    def hide_tooltip(self, event=None):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
 
 class TreeInventoryApp:
     def __init__(self, root):
@@ -41,6 +75,9 @@ class TreeInventoryApp:
         
         self.image_cache = {}
         self.pattern_stats = {}
+        self.match_cache = {}
+        self.image_size_cache = {}
+        self.fuzzy_cache = {}
 
     def create_content(self):
         content_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
@@ -95,7 +132,7 @@ class TreeInventoryApp:
         
         version_label = tk.Label(
             self.footer_frame,
-            text="Tree Inventory - Tree Cutting Terminal Report v1.0 | Created by Ron Michael Comia | © 2025",
+            text="Tree Inventory - Tree Cutting Terminal Report v1.1 | Created by Ron Michael Comia | © 2025",
             bg="#1E1E1E",
             fg="#888888",
             font=("Arial", 8),
@@ -172,8 +209,9 @@ class TreeInventoryApp:
         self.cutting_btn.config(fg="#FFFFFF")
         self.clear_content()
         
+        # Increase relheight to accommodate all content
         inventory_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
-        inventory_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        inventory_frame.place(relx=0.5, rely=0.05, relwidth=0.9, relheight=0.9, anchor="n")
         
         back_btn = tk.Button(
             inventory_frame,
@@ -347,38 +385,76 @@ class TreeInventoryApp:
         )
         self.process_btn.pack(pady=10)
         
-        self.status_frame = tk.Frame(inventory_frame, bg="#1E1E1E")
-        self.status_frame.pack(fill=tk.X, pady=10)
+        # Create a canvas and scrollbar for the status frame
+        status_canvas = tk.Canvas(inventory_frame, bg="#1E1E1E", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(inventory_frame, orient="vertical", command=status_canvas.yview)
+        self.status_frame = tk.Frame(status_canvas, bg="#1E1E1E")
         
+        # Configure canvas and scrollbar
+        self.status_frame.bind(
+            "<Configure>",
+            lambda e: status_canvas.configure(scrollregion=status_canvas.bbox("all"))
+        )
+        status_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Place canvas and scrollbar
+        status_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10, padx=10)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create a window in the canvas for the status frame
+        status_canvas.create_window((0, 0), window=self.status_frame, anchor="nw")
+        
+        def truncate_path(path, max_length=50):
+            if not path:
+                return "Not selected"
+            if len(path) <= max_length:
+                return path
+            return f"{path[:max_length-3]}..."
+        
+        # Excel File Label
+        excel_path = self.excel_file_path if self.excel_file_path else "Not selected"
         self.excel_label = tk.Label(
             self.status_frame,
-            text="Excel File: Not selected",
+            text=f"Excel File: {truncate_path(excel_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if self.excel_file_path else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.excel_label.pack(fill=tk.X)
+        self.excel_label.pack(fill=tk.X, pady=2)
+        if self.excel_file_path:
+            Tooltip(self.excel_label, self.excel_file_path)
         
+        # Images Folder Label
+        images_path = self.image_folder_path if self.image_folder_path else "Not selected"
         self.images_label = tk.Label(
             self.status_frame,
-            text="Images Folder: Not selected",
+            text=f"Images Folder: {truncate_path(images_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if self.image_folder_path else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.images_label.pack(fill=tk.X)
+        self.images_label.pack(fill=tk.X, pady=2)
+        if self.image_folder_path:
+            Tooltip(self.images_label, self.image_folder_path)
         
+        # Output Folder Label
+        output_path = self.output_folder_path if self.output_folder_path else "Not selected"
         self.output_label = tk.Label(
             self.status_frame,
-            text="Output Folder: Not selected",
+            text=f"Output Folder: {truncate_path(output_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if self.output_folder_path else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.output_label.pack(fill=tk.X)
+        self.output_label.pack(fill=tk.X, pady=2)
+        if self.output_folder_path:
+            Tooltip(self.output_label, self.output_folder_path)
         
         pattern_name = next((name for name, val in [
             ("Simple numbers", "simple_numbers"),
@@ -394,9 +470,10 @@ class TreeInventoryApp:
             bg="#1E1E1E",
             fg="#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.settings_label.pack(fill=tk.X)
+        self.settings_label.pack(fill=tk.X, pady=2)
         
         self.progress_frame = tk.Frame(inventory_frame, bg="#1E1E1E")
         self.progress_frame.pack(fill=tk.X, pady=10)
@@ -406,7 +483,7 @@ class TreeInventoryApp:
             text="Progress:",
             bg="#1E1E1E",
             fg="#FFFFFF",
-            font=("Arial", 8),
+            font=("Arial", 8)
         )
         self.progress_label.pack(anchor="w")
         
@@ -425,8 +502,9 @@ class TreeInventoryApp:
         self.inventory_btn.config(fg="#FFFFFF")
         self.clear_content()
         
+        # Increase relheight to accommodate all content
         cutting_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
-        cutting_frame.place(relx=0.5, rely=0.2, relwidth=0.8, relheight=0.7, anchor="n")
+        cutting_frame.place(relx=0.5, rely=0.05, relwidth=0.9, relheight=0.9, anchor="n")
         
         back_btn = tk.Button(
             cutting_frame,
@@ -566,48 +644,91 @@ class TreeInventoryApp:
         )
         self.cutting_process_btn.pack(pady=10)
         
-        self.cutting_status_frame = tk.Frame(cutting_frame, bg="#1E1E1E")
-        self.cutting_status_frame.pack(fill=tk.X, pady=10)
+        # Create a canvas and scrollbar for the status frame
+        status_canvas = tk.Canvas(cutting_frame, bg="#1E1E1E", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(cutting_frame, orient="vertical", command=status_canvas.yview)
+        self.cutting_status_frame = tk.Frame(status_canvas, bg="#1E1E1E")
         
+        # Configure canvas and scrollbar
+        self.cutting_status_frame.bind(
+            "<Configure>",
+            lambda e: status_canvas.configure(scrollregion=status_canvas.bbox("all"))
+        )
+        status_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Place canvas and scrollbar
+        status_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10, padx=10)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create a window in the canvas for the status frame
+        status_canvas.create_window((0, 0), window=self.cutting_status_frame, anchor="nw")
+        
+        def truncate_path(path, max_length=50):
+            if not path:
+                return "Not selected"
+            if len(path) <= max_length:
+                return path
+            return f"{path[:max_length-3]}..."
+        
+        # Before Images Label
+        before_path = getattr(self, 'before_images_folder', None) if hasattr(self, 'before_images_folder') else "Not selected"
         self.before_images_label = tk.Label(
             self.cutting_status_frame,
-            text="Before Images: Not selected",
+            text=f"Before Images: {truncate_path(before_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if hasattr(self, 'before_images_folder') else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.before_images_label.pack(fill=tk.X)
+        self.before_images_label.pack(fill=tk.X, pady=2)
+        if hasattr(self, 'before_images_folder'):
+            Tooltip(self.before_images_label, self.before_images_folder)
         
+        # After Images Label
+        after_path = getattr(self, 'after_images_folder', None) if hasattr(self, 'after_images_folder') else "Not selected"
         self.after_images_label = tk.Label(
             self.cutting_status_frame,
-            text="After Images: Not selected",
+            text=f"After Images: {truncate_path(after_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if hasattr(self, 'after_images_folder') else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.after_images_label.pack(fill=tk.X)
+        self.after_images_label.pack(fill=tk.X, pady=2)
+        if hasattr(self, 'after_images_folder'):
+            Tooltip(self.after_images_label, self.after_images_folder)
         
+        # Excel File Label
+        excel_path = getattr(self, 'cutting_excel_file', None) if hasattr(self, 'cutting_excel_file') else "Not selected"
         self.cutting_excel_label = tk.Label(
             self.cutting_status_frame,
-            text="Excel File: Not selected",
+            text=f"Excel File: {truncate_path(excel_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if hasattr(self, 'cutting_excel_file') else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.cutting_excel_label.pack(fill=tk.X)
+        self.cutting_excel_label.pack(fill=tk.X, pady=2)
+        if hasattr(self, 'cutting_excel_file'):
+            Tooltip(self.cutting_excel_label, self.cutting_excel_file)
         
+        # Output Folder Label
+        output_path = getattr(self, 'cutting_output_folder', None) if hasattr(self, 'cutting_output_folder') else "Not selected"
         self.cutting_output_label = tk.Label(
             self.cutting_status_frame,
-            text="Output Folder: Not selected",
+            text=f"Output Folder: {truncate_path(output_path)}",
             bg="#1E1E1E",
-            fg="#888888",
+            fg="#FFFFFF" if hasattr(self, 'cutting_output_folder') else "#888888",
             font=("Arial", 8),
-            anchor="w"
+            anchor="w",
+            wraplength=500
         )
-        self.cutting_output_label.pack(fill=tk.X)
+        self.cutting_output_label.pack(fill=tk.X, pady=2)
+        if hasattr(self, 'cutting_output_folder'):
+            Tooltip(self.cutting_output_label, self.cutting_output_folder)
         
         self.cutting_progress_frame = tk.Frame(cutting_frame, bg="#1E1E1E")
         self.cutting_progress_frame.pack(fill=tk.X, pady=10)
@@ -617,7 +738,7 @@ class TreeInventoryApp:
             text="Progress:",
             bg="#1E1E1E",
             fg="#FFFFFF",
-            font=("Arial", 8),
+            font=("Arial", 8)
         )
         self.cutting_progress_label.pack(anchor="w")
         
@@ -644,17 +765,20 @@ class TreeInventoryApp:
         
         if file_path:
             self.excel_file_path = file_path
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
             if hasattr(self, 'excel_label'):
                 self.excel_label.config(
-                    text=f"Excel File: {os.path.basename(file_path)}",
+                    text=f"Excel File: {truncate_path(file_path)}",
                     fg="#FFFFFF"
                 )
+                self.excel_label.unbind("<Enter>")
+                self.excel_label.unbind("<Leave>")
+                Tooltip(self.excel_label, file_path)
             else:
                 self.show_inventory()
-                self.excel_label.config(
-                    text=f"Excel File: {os.path.basename(file_path)}",
-                    fg="#FFFFFF"
-                )
             self.check_all_selected()
 
     def select_image_folder(self):
@@ -664,10 +788,20 @@ class TreeInventoryApp:
         
         if folder_path:
             self.image_folder_path = folder_path
-            self.images_label.config(
-                text=f"Images Folder: {os.path.basename(folder_path)}",
-                fg="#FFFFFF"
-            )
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
+            if hasattr(self, 'images_label'):
+                self.images_label.config(
+                    text=f"Images Folder: {truncate_path(folder_path)}",
+                    fg="#FFFFFF"
+                )
+                self.images_label.unbind("<Enter>")
+                self.images_label.unbind("<Leave>")
+                Tooltip(self.images_label, folder_path)
+            else:
+                self.show_inventory()
             self.check_all_selected()
 
     def select_output_folder(self):
@@ -677,10 +811,20 @@ class TreeInventoryApp:
         
         if folder_path:
             self.output_folder_path = folder_path
-            self.output_label.config(
-                text=f"Output Folder: {os.path.basename(folder_path)}",
-                fg="#FFFFFF"
-            )
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
+            if hasattr(self, 'output_label'):
+                self.output_label.config(
+                    text=f"Output Folder: {truncate_path(folder_path)}",
+                    fg="#FFFFFF"
+                )
+                self.output_label.unbind("<Enter>")
+                self.output_label.unbind("<Leave>")
+                Tooltip(self.output_label, folder_path)
+            else:
+                self.show_inventory()
             self.check_all_selected()
 
     def check_all_selected(self):
@@ -696,10 +840,20 @@ class TreeInventoryApp:
         
         if folder_path:
             self.before_images_folder = folder_path
-            self.before_images_label.config(
-                text=f"Before Images: {os.path.basename(folder_path)}",
-                fg="#FFFFFF"
-            )
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
+            if hasattr(self, 'before_images_label'):
+                self.before_images_label.config(
+                    text=f"Before Images: {truncate_path(folder_path)}",
+                    fg="#FFFFFF"
+                )
+                self.before_images_label.unbind("<Enter>")
+                self.before_images_label.unbind("<Leave>")
+                Tooltip(self.before_images_label, folder_path)
+            else:
+                self.show_cutting()
             self.check_cutting_inputs()
 
     def select_after_images(self):
@@ -709,10 +863,20 @@ class TreeInventoryApp:
         
         if folder_path:
             self.after_images_folder = folder_path
-            self.after_images_label.config(
-                text=f"After Images: {os.path.basename(folder_path)}",
-                fg="#FFFFFF"
-            )
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
+            if hasattr(self, 'after_images_label'):
+                self.after_images_label.config(
+                    text=f"After Images: {truncate_path(folder_path)}",
+                    fg="#FFFFFF"
+                )
+                self.after_images_label.unbind("<Enter>")
+                self.after_images_label.unbind("<Leave>")
+                Tooltip(self.after_images_label, folder_path)
+            else:
+                self.show_cutting()
             self.check_cutting_inputs()
 
     def select_cutting_excel(self):
@@ -723,10 +887,20 @@ class TreeInventoryApp:
         
         if file_path:
             self.cutting_excel_file = file_path
-            self.cutting_excel_label.config(
-                text=f"Excel File: {os.path.basename(file_path)}",
-                fg="#FFFFFF"
-            )
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
+            if hasattr(self, 'cutting_excel_label'):
+                self.cutting_excel_label.config(
+                    text=f"Excel File: {truncate_path(file_path)}",
+                    fg="#FFFFFF"
+                )
+                self.cutting_excel_label.unbind("<Enter>")
+                self.cutting_excel_label.unbind("<Leave>")
+                Tooltip(self.cutting_excel_label, file_path)
+            else:
+                self.show_cutting()
             self.check_cutting_inputs()
 
     def select_cutting_output(self):
@@ -736,10 +910,20 @@ class TreeInventoryApp:
         
         if folder_path:
             self.cutting_output_folder = folder_path
-            self.cutting_output_label.config(
-                text=f"Output Folder: {os.path.basename(folder_path)}",
-                fg="#FFFFFF"
-            )
+            def truncate_path(path, max_length=50):
+                if len(path) <= max_length:
+                    return path
+                return f"{path[:max_length-3]}..."
+            if hasattr(self, 'cutting_output_label'):
+                self.cutting_output_label.config(
+                    text=f"Output Folder: {truncate_path(folder_path)}",
+                    fg="#FFFFFF"
+                )
+                self.cutting_output_label.unbind("<Enter>")
+                self.cutting_output_label.unbind("<Leave>")
+                Tooltip(self.cutting_output_label, folder_path)
+            else:
+                self.show_cutting()
             self.check_cutting_inputs()
 
     def check_cutting_inputs(self):
@@ -852,6 +1036,7 @@ class TreeInventoryApp:
         self.use_subfolders = self.use_subfolders_var.get()
         
         self.image_cache = {}
+        self.fuzzy_cache = {}
         
         window.destroy()
         
@@ -896,7 +1081,7 @@ class TreeInventoryApp:
                         raise ValueError("Number of batches must be at least 1")
                 except ValueError:
                     messagebox.showerror("Invalid Input", "Batches to process must be 'All' or a valid number")
-                    return
+                return
             
             self.progress_frame.pack(fill=tk.X, pady=10)
             self.progress_bar["value"] = 0
@@ -983,6 +1168,7 @@ class TreeInventoryApp:
                 
                 if batch_num % 5 == 0:
                     self.match_cache.clear()
+                    self.fuzzy_cache.clear()
                     if len(self.image_size_cache) > 100:
                         self.image_size_cache.clear()
                     
@@ -991,6 +1177,8 @@ class TreeInventoryApp:
             
             if hasattr(self, 'match_cache'):
                 self.match_cache.clear()
+            if hasattr(self, 'fuzzy_cache'):
+                self.fuzzy_cache.clear()
             if hasattr(self, 'image_size_cache'):
                 self.image_size_cache.clear()
                 
@@ -1141,6 +1329,11 @@ class TreeInventoryApp:
                 
                 self.cutting_progress_bar["value"] = batch_num + 1
                 self.root.update()
+                
+                if batch_num % 5 == 0:
+                    self.fuzzy_cache.clear()
+            
+            self.fuzzy_cache.clear()
             
             self.cutting_progress_frame.pack_forget()
             messagebox.showinfo(
@@ -1295,7 +1488,7 @@ class TreeInventoryApp:
         try:
             tree_num_str = str(tree_number).strip()
             
-            if hasattr(self, 'match_cache') and tree_num_str in self.match_cache:
+            if tree_num_str in self.match_cache:
                 return self.match_cache[tree_num_str]
             
             if not hasattr(self, 'match_cache'):
@@ -1303,6 +1496,7 @@ class TreeInventoryApp:
                 
             pattern_type = self.image_pattern
             result = None
+            confidence_threshold = 80
             
             tree_num_lower = tree_num_str.lower()
             if f"file_{tree_num_lower}" in self.image_cache:
@@ -1323,9 +1517,7 @@ class TreeInventoryApp:
                             result = self.image_cache[f"tree_{numeric_tree_num}"]
                             
                     if not result and pattern_type == "auto_detect":
-                        if f"any_{numeric_tree_num}" in self.image_cache:
-                            result = self.image_cache[f"any_{numeric_tree_num}"]
-                        elif f"numsuf_{numeric_tree_num}" in self.image_cache:
+                        if f"numsuf_{numeric_tree_num}" in self.image_cache:
                             result = self.image_cache[f"numsuf_{numeric_tree_num}"]
                 except ValueError:
                     pass
@@ -1352,6 +1544,21 @@ class TreeInventoryApp:
                                 result = self.image_cache[f"numsuf_{num_val}_{suffix}"]
                         except ValueError:
                             pass
+            
+            if not result and pattern_type == "auto_detect":
+                if tree_num_str in self.fuzzy_cache:
+                    result = self.fuzzy_cache[tree_num_str]
+                else:
+                    best_score = 0
+                    best_path = None
+                    for key, path in self.image_cache.items():
+                        if not key.startswith(('num_', 'tree_', 'alpha_', 'numsuf_')):
+                            score = fuzz.ratio(tree_num_str.lower(), key.replace('file_', '').lower())
+                            if score > best_score and score >= confidence_threshold:
+                                best_score = score
+                                best_path = path
+                    result = best_path
+                    self.fuzzy_cache[tree_num_str] = result
             
             self.match_cache[tree_num_str] = result
             return result
@@ -1400,6 +1607,8 @@ class TreeInventoryApp:
         
         for section in doc.sections:
             section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(0.5)
+            section.page_width = Inches(8.27)
+            section.page_height = Inches(11.69)
         
         actual_rows = len(batch_df)
         trees_per_column = (actual_rows + 1) // 2
@@ -1415,7 +1624,7 @@ class TreeInventoryApp:
         for i in range(table_rows):
             table.rows[i].height = Inches(2.5 if i % 2 == 0 else 0.4)
         
-        arial_11_bold = {'name': 'Arial', 'size': Pt(11), 'bold': True}
+        arial_11_bold = {'name': 'Bernard Mt Condensed', 'size': Pt(16), 'bold': True}
         
         chunk_size = 10
         for chunk_start in range(0, actual_rows, chunk_size):
@@ -1464,6 +1673,8 @@ class TreeInventoryApp:
         
         if hasattr(self, 'match_cache'):
             self.match_cache.clear()
+        if hasattr(self, 'fuzzy_cache'):
+            self.fuzzy_cache.clear()
         
         file_name = os.path.join(
             self.output_folder_path, 
@@ -1518,6 +1729,8 @@ class TreeInventoryApp:
         
         for section in doc.sections:
             section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(0.5)
+            section.page_width = Inches(8.27)
+            section.page_height = Inches(11.69)
         
         title = doc.add_paragraph("Tree Cutting Report")
         title_format = title.paragraph_format
@@ -1623,20 +1836,27 @@ class TreeInventoryApp:
             tree_num_str = str(tree_number).strip()
             tree_num_lower = tree_num_str.lower()
             
+            if tree_num_str in self.fuzzy_cache:
+                return self.fuzzy_cache[tree_num_str]
+            
             if tree_num_lower in image_cache:
+                self.fuzzy_cache[tree_num_str] = image_cache[tree_num_lower]
                 return image_cache[tree_num_lower]
             
             try:
                 numeric_tree_num = int(tree_num_str)
                 
                 if f"num_{numeric_tree_num}" in image_cache:
+                    self.fuzzy_cache[tree_num_str] = image_cache[f"num_{numeric_tree_num}"]
                     return image_cache[f"num_{numeric_tree_num}"]
                     
                 if f"tree_{numeric_tree_num}" in image_cache:
+                    self.fuzzy_cache[tree_num_str] = image_cache[f"tree_{numeric_tree_num}"]
                     return image_cache[f"tree_{numeric_tree_num}"]
                     
                 for key in image_cache:
                     if key.startswith(f"alpha_") and key.endswith(f"_{numeric_tree_num}"):
+                        self.fuzzy_cache[tree_num_str] = image_cache[key]
                         return image_cache[key]
                         
             except ValueError:
@@ -1648,16 +1868,24 @@ class TreeInventoryApp:
                 try:
                     num_val = int(alpha_match.group(2))
                     if f"alpha_{prefix}_{num_val}" in image_cache:
+                        self.fuzzy_cache[tree_num_str] = image_cache[f"alpha_{prefix}_{num_val}"]
                         return image_cache[f"alpha_{prefix}_{num_val}"]
                 except ValueError:
                     pass
                     
+            best_score = 0
+            best_path = None
+            confidence_threshold = 80
             for key, path in image_cache.items():
                 if not key.startswith(("num_", "tree_", "alpha_")):
-                    if tree_num_lower in key:
-                        return path
-                    
-            return None
+                    score = fuzz.ratio(tree_num_lower, key.lower())
+                    if score > best_score and score >= confidence_threshold:
+                        best_score = score
+                        best_path = path
+            
+            self.fuzzy_cache[tree_num_str] = best_path
+            return best_path
+            
         except Exception as e:
             print(f"Error finding cutting image for tree {tree_number}: {str(e)}")
             return None
