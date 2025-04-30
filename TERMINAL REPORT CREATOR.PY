@@ -69,6 +69,8 @@ class TreeInventoryApp:
         self.start_row = 2
         self.batch_size = 1002
         self.num_batches_to_process = None
+        self.docx_filename_prefix = "TreeData"  # Default prefix for Inventory
+        self.cutting_docx_filename_prefix = "TreeCutting"  # Default prefix for Cutting
         
         self.image_pattern = "auto_detect"
         self.use_subfolders = True
@@ -132,7 +134,7 @@ class TreeInventoryApp:
         
         version_label = tk.Label(
             self.footer_frame,
-            text="Tree Inventory - Tree Cutting Terminal Report v1.1 | Created by Ron Michael Comia | © 2025",
+            text="Tree Inventory - Tree Cutting Terminal Report v1.2 | Created by Ron Michael Comia | © 2025",
             bg="#1E1E1E",
             fg="#888888",
             font=("Arial", 8),
@@ -176,11 +178,13 @@ class TreeInventoryApp:
         help_text = tk.Label(
             help_window,
             text="Tree Inventory - Tree Cutting Terminal Report\n\n"
-                 "1. Select Excel file with tree data\n"
-                 "2. Choose image folder\n"
-                 "3. Set output folder\n"
-                 "4. Configure settings as needed\n"
-                 "5. Click 'Generate Word Documents'\n\n"
+                 "1. Make sure the Photo/Pictures is named properly\n"
+                 "2. Select Excel file with tree data\n"
+                 "3. Choose image folder\n"
+                 "4. Set output folder\n"
+                 "5. Configure settings as needed\n"
+                 "6. Name the File the way you want it\n"
+                 "7. Click 'Generate Word Documents'\n\n"
                  "For issues, contact ronm.comia@gmail.com",
             bg="#1E1E1E",
             fg="#FFFFFF",
@@ -209,7 +213,6 @@ class TreeInventoryApp:
         self.cutting_btn.config(fg="#FFFFFF")
         self.clear_content()
         
-        # Increase relheight to accommodate all content
         inventory_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
         inventory_frame.place(relx=0.5, rely=0.05, relwidth=0.9, relheight=0.9, anchor="n")
         
@@ -370,6 +373,32 @@ class TreeInventoryApp:
         )
         help_label.pack(side=tk.LEFT, padx=5)
         
+        # Filename prefix input for Inventory
+        filename_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        filename_frame.pack(pady=5, fill=tk.X)
+        
+        filename_label = tk.Label(
+            filename_frame,
+            text="DOCX Filename Prefix:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        filename_label.pack(side=tk.LEFT, padx=5)
+        
+        self.filename_prefix_var = tk.StringVar(value=self.docx_filename_prefix)
+        filename_entry = tk.Entry(
+            filename_frame,
+            textvariable=self.filename_prefix_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=20
+        )
+        filename_entry.pack(side=tk.LEFT, padx=5)
+        
         self.process_btn = tk.Button(
             inventory_frame,
             text="Generate Word Documents",
@@ -385,23 +414,19 @@ class TreeInventoryApp:
         )
         self.process_btn.pack(pady=10)
         
-        # Create a canvas and scrollbar for the status frame
         status_canvas = tk.Canvas(inventory_frame, bg="#1E1E1E", highlightthickness=0)
         scrollbar = ttk.Scrollbar(inventory_frame, orient="vertical", command=status_canvas.yview)
         self.status_frame = tk.Frame(status_canvas, bg="#1E1E1E")
         
-        # Configure canvas and scrollbar
         self.status_frame.bind(
             "<Configure>",
             lambda e: status_canvas.configure(scrollregion=status_canvas.bbox("all"))
         )
         status_canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Place canvas and scrollbar
         status_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10, padx=10)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Create a window in the canvas for the status frame
         status_canvas.create_window((0, 0), window=self.status_frame, anchor="nw")
         
         def truncate_path(path, max_length=50):
@@ -411,7 +436,6 @@ class TreeInventoryApp:
                 return path
             return f"{path[:max_length-3]}..."
         
-        # Excel File Label
         excel_path = self.excel_file_path if self.excel_file_path else "Not selected"
         self.excel_label = tk.Label(
             self.status_frame,
@@ -426,7 +450,6 @@ class TreeInventoryApp:
         if self.excel_file_path:
             Tooltip(self.excel_label, self.excel_file_path)
         
-        # Images Folder Label
         images_path = self.image_folder_path if self.image_folder_path else "Not selected"
         self.images_label = tk.Label(
             self.status_frame,
@@ -441,7 +464,6 @@ class TreeInventoryApp:
         if self.image_folder_path:
             Tooltip(self.images_label, self.image_folder_path)
         
-        # Output Folder Label
         output_path = self.output_folder_path if self.output_folder_path else "Not selected"
         self.output_label = tk.Label(
             self.status_frame,
@@ -502,7 +524,6 @@ class TreeInventoryApp:
         self.inventory_btn.config(fg="#FFFFFF")
         self.clear_content()
         
-        # Increase relheight to accommodate all content
         cutting_frame = tk.Frame(self.main_frame, bg="#1E1E1E")
         cutting_frame.place(relx=0.5, rely=0.05, relwidth=0.9, relheight=0.9, anchor="n")
         
@@ -629,6 +650,32 @@ class TreeInventoryApp:
         )
         batch_size_entry.pack(side=tk.LEFT, padx=5)
         
+        # Filename prefix input for Cutting
+        filename_frame = tk.Frame(config_frame, bg="#1E1E1E")
+        filename_frame.pack(pady=5, fill=tk.X)
+        
+        filename_label = tk.Label(
+            filename_frame,
+            text="DOCX Filename Prefix:",
+            bg="#1E1E1E",
+            fg="#FFFFFF",
+            font=("Arial", 10),
+            width=15,
+            anchor="e"
+        )
+        filename_label.pack(side=tk.LEFT, padx=5)
+        
+        self.cutting_filename_prefix_var = tk.StringVar(value=self.cutting_docx_filename_prefix)
+        filename_entry = tk.Entry(
+            filename_frame,
+            textvariable=self.cutting_filename_prefix_var,
+            bg="#2A2A2A",
+            fg="#FFFFFF",
+            insertbackground="#FFFFFF",
+            width=20
+        )
+        filename_entry.pack(side=tk.LEFT, padx=5)
+        
         self.cutting_process_btn = tk.Button(
             cutting_frame,
             text="Generate Cutting Documents",
@@ -644,23 +691,19 @@ class TreeInventoryApp:
         )
         self.cutting_process_btn.pack(pady=10)
         
-        # Create a canvas and scrollbar for the status frame
         status_canvas = tk.Canvas(cutting_frame, bg="#1E1E1E", highlightthickness=0)
         scrollbar = ttk.Scrollbar(cutting_frame, orient="vertical", command=status_canvas.yview)
         self.cutting_status_frame = tk.Frame(status_canvas, bg="#1E1E1E")
         
-        # Configure canvas and scrollbar
         self.cutting_status_frame.bind(
             "<Configure>",
             lambda e: status_canvas.configure(scrollregion=status_canvas.bbox("all"))
         )
         status_canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Place canvas and scrollbar
         status_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=10, padx=10)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Create a window in the canvas for the status frame
         status_canvas.create_window((0, 0), window=self.cutting_status_frame, anchor="nw")
         
         def truncate_path(path, max_length=50):
@@ -670,7 +713,6 @@ class TreeInventoryApp:
                 return path
             return f"{path[:max_length-3]}..."
         
-        # Before Images Label
         before_path = getattr(self, 'before_images_folder', None) if hasattr(self, 'before_images_folder') else "Not selected"
         self.before_images_label = tk.Label(
             self.cutting_status_frame,
@@ -685,7 +727,6 @@ class TreeInventoryApp:
         if hasattr(self, 'before_images_folder'):
             Tooltip(self.before_images_label, self.before_images_folder)
         
-        # After Images Label
         after_path = getattr(self, 'after_images_folder', None) if hasattr(self, 'after_images_folder') else "Not selected"
         self.after_images_label = tk.Label(
             self.cutting_status_frame,
@@ -700,7 +741,6 @@ class TreeInventoryApp:
         if hasattr(self, 'after_images_folder'):
             Tooltip(self.after_images_label, self.after_images_folder)
         
-        # Excel File Label
         excel_path = getattr(self, 'cutting_excel_file', None) if hasattr(self, 'cutting_excel_file') else "Not selected"
         self.cutting_excel_label = tk.Label(
             self.cutting_status_frame,
@@ -715,7 +755,6 @@ class TreeInventoryApp:
         if hasattr(self, 'cutting_excel_file'):
             Tooltip(self.cutting_excel_label, self.cutting_excel_file)
         
-        # Output Folder Label
         output_path = getattr(self, 'cutting_output_folder', None) if hasattr(self, 'cutting_output_folder') else "Not selected"
         self.cutting_output_label = tk.Label(
             self.cutting_status_frame,
@@ -1023,7 +1062,7 @@ class TreeInventoryApp:
             bg="#1E1E1E",
             fg="#FFFFFF",
             activebackground="#2A2A2A",
-            activeforeground="#FFFFFF",
+            activenighttime="#FFFFFF",
             bd=1,
             relief=tk.SOLID,
             font=("Arial", 10),
@@ -1081,7 +1120,13 @@ class TreeInventoryApp:
                         raise ValueError("Number of batches must be at least 1")
                 except ValueError:
                     messagebox.showerror("Invalid Input", "Batches to process must be 'All' or a valid number")
-                return
+                    return
+            
+            # Get and sanitize custom filename prefix for Inventory
+            self.docx_filename_prefix = self.filename_prefix_var.get().strip()
+            if not self.docx_filename_prefix:
+                self.docx_filename_prefix = "TreeData"  # Fallback to default
+            self.docx_filename_prefix = re.sub(r'[<>:"/\\|?*]', '_', self.docx_filename_prefix)
             
             self.progress_frame.pack(fill=tk.X, pady=10)
             self.progress_bar["value"] = 0
@@ -1222,6 +1267,12 @@ class TreeInventoryApp:
                 messagebox.showerror("Invalid Input", "Batch size must be a valid number (1 or greater)")
                 return
             
+            # Get and sanitize custom filename prefix for Cutting
+            self.cutting_docx_filename_prefix = self.cutting_filename_prefix_var.get().strip()
+            if not self.cutting_docx_filename_prefix:
+                self.cutting_docx_filename_prefix = "TreeCutting"  # Fallback to default
+            self.cutting_docx_filename_prefix = re.sub(r'[<>:"/\\|?*]', '_', self.cutting_docx_filename_prefix)
+            
             self.cutting_progress_frame.pack(fill=tk.X, pady=10)
             self.cutting_progress_bar["value"] = 0
             self.root.update()
@@ -1254,7 +1305,7 @@ class TreeInventoryApp:
                         'Tree Number': 'TREE NUMBER', 
                         'Species': 'SPECIES',
                         'Cutting Date': 'CUTTING DATE',
-                        'Notes': 'Notes'
+                        'Notes': 'NOTES'
                     }, inplace=True)
                 except ValueError:
                     df = pd.read_excel(self.cutting_excel_file)
@@ -1626,6 +1677,9 @@ class TreeInventoryApp:
         
         arial_11_bold = {'name': 'Bernard Mt Condensed', 'size': Pt(16), 'bold': True}
         
+        # List to store tree numbers with no images
+        no_image_trees = []
+        
         chunk_size = 10
         for chunk_start in range(0, actual_rows, chunk_size):
             chunk_end = min(chunk_start + chunk_size, actual_rows)
@@ -1653,10 +1707,12 @@ class TreeInventoryApp:
                         image_para.text = f"[No image found for Tree {tree_number}]"
                         for run in image_para.runs:
                             run.italic = True
+                        no_image_trees.append(tree_number)
                 else:
                     image_para.text = f"[No image found for Tree {tree_number}]"
                     for run in image_para.runs:
                         run.italic = True
+                    no_image_trees.append(tree_number)
                 
                 text_cell = table.cell(row_index + 1, col_index)
                 text_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
@@ -1678,12 +1734,44 @@ class TreeInventoryApp:
         
         file_name = os.path.join(
             self.output_folder_path, 
-            f"TreeData_Batch{batch_num}_of_{total_batches}.docx"
+            f"{self.docx_filename_prefix}_Batch{batch_num}_of_{total_batches}.docx"
         )
         doc.save(file_name)
         
+        # Save the list of trees with no images to a text file
+        if no_image_trees:
+            self.save_no_image_list(no_image_trees, batch_num, total_batches)
+        
         if batch_num % 5 == 0 and hasattr(self, 'image_size_cache'):
             self.image_size_cache.clear()
+
+    def save_no_image_list(self, no_image_trees, batch_num, total_batches):
+        """
+        Save a list of tree numbers with no images to a text file in a NoImageReports folder.
+        
+        Args:
+            no_image_trees (list): List of tree numbers with no images.
+            batch_num (int): Current batch number.
+            total_batches (int): Total number of batches.
+        """
+        try:
+            # Create NoImageReports folder
+            no_image_folder = os.path.join(self.output_folder_path, "NoImageReports")
+            if not os.path.exists(no_image_folder):
+                os.makedirs(no_image_folder)
+            
+            # Define file path in NoImageReports folder
+            file_name = os.path.join(
+                no_image_folder,
+                f"NoImages_Batch{batch_num}_of_{total_batches}.txt"
+            )
+            with open(file_name, 'w', encoding='utf-8') as f:
+                f.write("Trees with No Images Found:\n")
+                f.write("--------------------------\n")
+                for tree_number in no_image_trees:
+                    f.write(f"Tree Number: {tree_number}\n")
+        except Exception as e:
+            print(f"Error writing no-image list for batch {batch_num}: {str(e)}")
 
     def load_cutting_images(self, folder_path):
         image_cache = {}
@@ -1824,7 +1912,7 @@ class TreeInventoryApp:
         
         file_name = os.path.join(
             self.cutting_output_folder, 
-            f"TreeCutting_Batch{batch_num}_of_{total_batches}.docx"
+            f"{self.cutting_docx_filename_prefix}_Batch{batch_num}_of_{total_batches}.docx"
         )
         doc.save(file_name)
 
