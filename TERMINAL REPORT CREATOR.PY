@@ -1062,7 +1062,7 @@ class TreeInventoryApp:
             bg="#1E1E1E",
             fg="#FFFFFF",
             activebackground="#2A2A2A",
-            activenighttime="#FFFFFF",
+            activeforeground="#FFFFFF",
             bd=1,
             relief=tk.SOLID,
             font=("Arial", 10),
@@ -1738,7 +1738,7 @@ class TreeInventoryApp:
         )
         doc.save(file_name)
         
-        # Save the list of trees with no images to a text file
+        # Save the list of trees with no images to an Excel file
         if no_image_trees:
             self.save_no_image_list(no_image_trees, batch_num, total_batches)
         
@@ -1747,7 +1747,7 @@ class TreeInventoryApp:
 
     def save_no_image_list(self, no_image_trees, batch_num, total_batches):
         """
-        Save a list of tree numbers with no images to a text file in a NoImageReports folder.
+        Save a list of tree numbers with no images to an Excel file in a NoImageReports folder.
         
         Args:
             no_image_trees (list): List of tree numbers with no images.
@@ -1763,13 +1763,15 @@ class TreeInventoryApp:
             # Define file path in NoImageReports folder
             file_name = os.path.join(
                 no_image_folder,
-                f"NoImages_Batch{batch_num}_of_{total_batches}.txt"
+                f"NoImages_Batch{batch_num}_of_{total_batches}.xlsx"
             )
-            with open(file_name, 'w', encoding='utf-8') as f:
-                f.write("Trees with No Images Found:\n")
-                f.write("--------------------------\n")
-                for tree_number in no_image_trees:
-                    f.write(f"Tree Number: {tree_number}\n")
+            
+            # Create a DataFrame from the list of tree numbers
+            df = pd.DataFrame(no_image_trees, columns=["Tree Number"])
+            
+            # Save the DataFrame to an Excel file
+            df.to_excel(file_name, index=False, engine='openpyxl')
+            
         except Exception as e:
             print(f"Error writing no-image list for batch {batch_num}: {str(e)}")
 
