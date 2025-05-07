@@ -14,6 +14,7 @@ import threading
 import math
 from datetime import datetime
 from fuzzywuzzy import fuzz
+import json
 
 class Tooltip:
     def __init__(self, widget, text):
@@ -339,6 +340,19 @@ class TreeInventoryApp:
         )
         batch_size_entry.pack(side=tk.LEFT, padx=5)
         
+        # Add batch calculation display
+        self.batch_calc_label = tk.Label(
+            batch_size_frame,
+            text="Estimated batches: --",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8)
+        )
+        self.batch_calc_label.pack(side=tk.LEFT, padx=5)
+        
+        # Bind batch size changes
+        self.batch_size_var.trace_add("write", self.update_batch_calculation)
+        
         num_batches_frame = tk.Frame(config_frame, bg="#1E1E1E")
         num_batches_frame.pack(pady=5, fill=tk.X)
         
@@ -650,6 +664,19 @@ class TreeInventoryApp:
         )
         batch_size_entry.pack(side=tk.LEFT, padx=5)
         
+        # Add batch calculation display for cutting mode
+        self.cutting_batch_calc_label = tk.Label(
+            batch_size_frame,
+            text="Estimated batches: --",
+            bg="#1E1E1E",
+            fg="#888888",
+            font=("Arial", 8)
+        )
+        self.cutting_batch_calc_label.pack(side=tk.LEFT, padx=5)
+        
+        # Bind batch size changes for cutting mode
+        self.cutting_batch_size_var.trace_add("write", self.update_cutting_batch_calculation)
+        
         # Filename prefix input for Cutting
         filename_frame = tk.Frame(config_frame, bg="#1E1E1E")
         filename_frame.pack(pady=5, fill=tk.X)
@@ -818,7 +845,45 @@ class TreeInventoryApp:
                 Tooltip(self.excel_label, file_path)
             else:
                 self.show_inventory()
+            
+            # Calculate batches after loading Excel file
+            self.update_batch_calculation()
             self.check_all_selected()
+
+    def update_batch_calculation(self, *args):
+        """Update the batch calculation display based on Excel file and batch size."""
+        try:
+            if not self.excel_file_path:
+                self.batch_calc_label.config(text="Estimated batches: --")
+                return
+                
+            # Read Excel file to get total rows
+            df = pd.read_excel(self.excel_file_path)
+            total_rows = len(df)
+            
+            # Get current batch size
+            try:
+                batch_size = int(self.batch_size_var.get())
+                if batch_size < 1:
+                    raise ValueError("Batch size must be positive")
+            except ValueError:
+                self.batch_calc_label.config(text="Estimated batches: Invalid batch size")
+                return
+            
+            # Calculate number of batches
+            num_batches = math.ceil(total_rows / batch_size)
+            
+            # Update display
+            self.batch_calc_label.config(
+                text=f"Estimated batches: {num_batches} (Total rows: {total_rows})",
+                fg="#FFFFFF"
+            )
+            
+        except Exception as e:
+            self.batch_calc_label.config(
+                text=f"Error calculating batches: {str(e)}",
+                fg="#FF0000"
+            )
 
     def select_image_folder(self):
         folder_path = filedialog.askdirectory(
@@ -940,6 +1005,9 @@ class TreeInventoryApp:
                 Tooltip(self.cutting_excel_label, file_path)
             else:
                 self.show_cutting()
+            
+            # Calculate batches after loading Excel file
+            self.update_cutting_batch_calculation()
             self.check_cutting_inputs()
 
     def select_cutting_output(self):
@@ -1196,29 +1264,65 @@ class TreeInventoryApp:
             if not hasattr(self, 'image_size_cache'):
                 self.image_size_cache = {}
             
+            # Create batch status tracking
+            batch_status = {
+                'completed': 0,
+                'failed': 0,
+                'skipped': 0,
+                'errors': []
+            }
+            
+            # Create batch validation folder
+            validation_folder = os.path.join(self.output_folder_path, 'BatchValidation')
+            if not os.path.exists(validation_folder):
+                os.makedirs(validation_folder)
+            
             for batch_num in range(num_batches):
-                self.progress_label.config(text=f"Processing batch {batch_num + 1} of {num_batches}...")
-                self.progress_bar["value"] = batch_num
-                self.root.update()
-                
-                batch_start = batch_num * self.batch_size
-                batch_end = min((batch_num + 1) * self.batch_size, total_rows)
-                
-                batch_df = df.iloc[batch_start:batch_end].copy()
-                
-                self.generate_word_doc(batch_df, batch_num + 1, num_batches)
-                
-                self.progress_bar["value"] = batch_num + 1
-                self.root.update()
-                
-                if batch_num % 5 == 0:
-                    self.match_cache.clear()
-                    self.fuzzy_cache.clear()
-                    if len(self.image_size_cache) > 100:
-                        self.image_size_cache.clear()
+                try:
+                    self.progress_label.config(text=f"Processing batch {batch_num + 1} of {num_batches}...")
+                    self.progress_bar["value"] = batch_num
+                    self.root.update()
                     
-                    import gc
-                    gc.collect()
+                    batch_start = batch_num * self.batch_size
+                    batch_end = min((batch_num + 1) * self.batch_size, total_rows)
+                    
+                    batch_df = df.iloc[batch_start:batch_end].copy()
+                    
+                    # Validate batch data
+                    validation_result = self.validate_batch(batch_df, batch_num + 1)
+                    if not validation_result['is_valid']:
+                        batch_status['skipped'] += 1
+                        batch_status['errors'].append(f"Batch {batch_num + 1}: {validation_result['message']}")
+                        continue
+                    
+                    # Process batch with error handling
+                    try:
+                        self.generate_word_doc(batch_df, batch_num + 1, num_batches)
+                        batch_status['completed'] += 1
+                    except Exception as e:
+                        batch_status['failed'] += 1
+                        batch_status['errors'].append(f"Batch {batch_num + 1}: {str(e)}")
+                        continue
+                    
+                    # Save batch status
+                    self.save_batch_status(batch_status, validation_folder)
+                    
+                    self.progress_bar["value"] = batch_num + 1
+                    self.root.update()
+                    
+                    if batch_num % 5 == 0:
+                        self.match_cache.clear()
+                        self.fuzzy_cache.clear()
+                        if len(self.image_size_cache) > 100:
+                            self.image_size_cache.clear()
+                        
+                        import gc
+                        gc.collect()
+                
+                except Exception as e:
+                    batch_status['failed'] += 1
+                    batch_status['errors'].append(f"Batch {batch_num + 1}: {str(e)}")
+                    continue
             
             if hasattr(self, 'match_cache'):
                 self.match_cache.clear()
@@ -1235,10 +1339,15 @@ class TreeInventoryApp:
                 except:
                     pass
             
+            # Generate final report
+            self.generate_processing_report(batch_status, validation_folder)
+            
             self.progress_frame.pack_forget()
             messagebox.showinfo(
                 "Processing Complete", 
-                f"Generated {num_batches} Word documents in {self.output_folder_path}"
+                f"Generated {batch_status['completed']} Word documents in {self.output_folder_path}\n"
+                f"Failed: {batch_status['failed']}\n"
+                f"Skipped: {batch_status['skipped']}"
             )
             
         except Exception as e:
@@ -1246,6 +1355,63 @@ class TreeInventoryApp:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
             import traceback
             traceback.print_exc()
+
+    def validate_batch(self, batch_df, batch_num):
+        """Validate a batch of data before processing."""
+        try:
+            # Check for empty batch
+            if batch_df.empty:
+                return {'is_valid': False, 'message': 'Empty batch'}
+            
+            # Check for required columns
+            required_cols = ['TREE NUMBER', 'SPECIES']
+            missing_cols = [col for col in required_cols if col not in batch_df.columns]
+            if missing_cols:
+                return {'is_valid': False, 'message': f'Missing columns: {", ".join(missing_cols)}'}
+            
+            # Check for invalid tree numbers
+            invalid_trees = batch_df[batch_df['TREE NUMBER'].isna() | (batch_df['TREE NUMBER'] == '')]
+            if not invalid_trees.empty:
+                return {'is_valid': False, 'message': f'Invalid tree numbers found in rows: {", ".join(map(str, invalid_trees.index + 1))}'}
+            
+            # Check for duplicate tree numbers
+            duplicates = batch_df[batch_df['TREE NUMBER'].duplicated()]
+            if not duplicates.empty:
+                return {'is_valid': False, 'message': f'Duplicate tree numbers found: {", ".join(duplicates["TREE NUMBER"].unique())}'}
+            
+            return {'is_valid': True, 'message': 'Batch validation successful'}
+            
+        except Exception as e:
+            return {'is_valid': False, 'message': f'Validation error: {str(e)}'}
+
+    def save_batch_status(self, batch_status, validation_folder):
+        """Save the current batch processing status."""
+        try:
+            status_file = os.path.join(validation_folder, 'batch_status.json')
+            with open(status_file, 'w') as f:
+                json.dump(batch_status, f, indent=4)
+        except Exception as e:
+            print(f"Error saving batch status: {str(e)}")
+
+    def generate_processing_report(self, batch_status, validation_folder):
+        """Generate a detailed processing report."""
+        try:
+            report_file = os.path.join(validation_folder, 'processing_report.txt')
+            with open(report_file, 'w') as f:
+                f.write("Tree Inventory Processing Report\n")
+                f.write("=============================\n\n")
+                f.write(f"Total batches completed: {batch_status['completed']}\n")
+                f.write(f"Total batches failed: {batch_status['failed']}\n")
+                f.write(f"Total batches skipped: {batch_status['skipped']}\n\n")
+                
+                if batch_status['errors']:
+                    f.write("Errors encountered:\n")
+                    for error in batch_status['errors']:
+                        f.write(f"- {error}\n")
+                
+                f.write("\nProcessing completed at: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        except Exception as e:
+            print(f"Error generating processing report: {str(e)}")
 
     def process_cutting_data(self):
         try:
@@ -1366,30 +1532,71 @@ class TreeInventoryApp:
             before_images = self.load_cutting_images(self.before_images_folder)
             after_images = self.load_cutting_images(self.after_images_folder)
             
+            # Create batch status tracking
+            batch_status = {
+                'completed': 0,
+                'failed': 0,
+                'skipped': 0,
+                'errors': []
+            }
+            
+            # Create batch validation folder
+            validation_folder = os.path.join(self.cutting_output_folder, 'BatchValidation')
+            if not os.path.exists(validation_folder):
+                os.makedirs(validation_folder)
+            
             for batch_num in range(num_batches):
-                self.cutting_progress_label.config(text=f"Processing batch {batch_num + 1} of {num_batches}...")
-                self.cutting_progress_bar["value"] = batch_num
-                self.root.update()
+                try:
+                    self.cutting_progress_label.config(text=f"Processing batch {batch_num + 1} of {num_batches}...")
+                    self.cutting_progress_bar["value"] = batch_num
+                    self.root.update()
+                    
+                    batch_start = batch_num * batch_size
+                    batch_end = min((batch_num + 1) * batch_size, total_rows)
+                    
+                    batch_df = df.iloc[batch_start:batch_end].copy()
+                    
+                    # Validate batch data
+                    validation_result = self.validate_cutting_batch(batch_df, batch_num + 1, before_images, after_images)
+                    if not validation_result['is_valid']:
+                        batch_status['skipped'] += 1
+                        batch_status['errors'].append(f"Batch {batch_num + 1}: {validation_result['message']}")
+                        continue
+                    
+                    # Process batch with error handling
+                    try:
+                        self.generate_cutting_doc(batch_df, batch_num + 1, num_batches, before_images, after_images)
+                        batch_status['completed'] += 1
+                    except Exception as e:
+                        batch_status['failed'] += 1
+                        batch_status['errors'].append(f"Batch {batch_num + 1}: {str(e)}")
+                        continue
+                    
+                    # Save batch status
+                    self.save_batch_status(batch_status, validation_folder)
+                    
+                    self.cutting_progress_bar["value"] = batch_num + 1
+                    self.root.update()
+                    
+                    if batch_num % 5 == 0:
+                        self.fuzzy_cache.clear()
                 
-                batch_start = batch_num * batch_size
-                batch_end = min((batch_num + 1) * batch_size, total_rows)
-                
-                batch_df = df.iloc[batch_start:batch_end].copy()
-                
-                self.generate_cutting_doc(batch_df, batch_num + 1, num_batches, before_images, after_images)
-                
-                self.cutting_progress_bar["value"] = batch_num + 1
-                self.root.update()
-                
-                if batch_num % 5 == 0:
-                    self.fuzzy_cache.clear()
+                except Exception as e:
+                    batch_status['failed'] += 1
+                    batch_status['errors'].append(f"Batch {batch_num + 1}: {str(e)}")
+                    continue
             
             self.fuzzy_cache.clear()
+            
+            # Generate final report
+            self.generate_processing_report(batch_status, validation_folder)
             
             self.cutting_progress_frame.pack_forget()
             messagebox.showinfo(
                 "Processing Complete", 
-                f"Generated {num_batches} cutting documents in {self.cutting_output_folder}"
+                f"Generated {batch_status['completed']} cutting documents in {self.cutting_output_folder}\n"
+                f"Failed: {batch_status['failed']}\n"
+                f"Skipped: {batch_status['skipped']}"
             )
             
         except Exception as e:
@@ -1397,6 +1604,52 @@ class TreeInventoryApp:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
             import traceback
             traceback.print_exc()
+
+    def validate_cutting_batch(self, batch_df, batch_num, before_images, after_images):
+        """Validate a batch of cutting data before processing."""
+        try:
+            # Check for empty batch
+            if batch_df.empty:
+                return {'is_valid': False, 'message': 'Empty batch'}
+            
+            # Check for required columns
+            required_cols = ['TREE NUMBER', 'SPECIES']
+            missing_cols = [col for col in required_cols if col not in batch_df.columns]
+            if missing_cols:
+                return {'is_valid': False, 'message': f'Missing columns: {", ".join(missing_cols)}'}
+            
+            # Check for invalid tree numbers
+            invalid_trees = batch_df[batch_df['TREE NUMBER'].isna() | (batch_df['TREE NUMBER'] == '')]
+            if not invalid_trees.empty:
+                return {'is_valid': False, 'message': f'Invalid tree numbers found in rows: {", ".join(map(str, invalid_trees.index + 1))}'}
+            
+            # Check for duplicate tree numbers
+            duplicates = batch_df[batch_df['TREE NUMBER'].duplicated()]
+            if not duplicates.empty:
+                return {'is_valid': False, 'message': f'Duplicate tree numbers found: {", ".join(duplicates["TREE NUMBER"].unique())}'}
+            
+            # Check for missing images
+            missing_before = []
+            missing_after = []
+            for _, row in batch_df.iterrows():
+                tree_num = str(row['TREE NUMBER'])
+                if not self.find_cutting_image(tree_num, before_images):
+                    missing_before.append(tree_num)
+                if not self.find_cutting_image(tree_num, after_images):
+                    missing_after.append(tree_num)
+            
+            if missing_before or missing_after:
+                message = []
+                if missing_before:
+                    message.append(f"Missing before images for trees: {', '.join(missing_before)}")
+                if missing_after:
+                    message.append(f"Missing after images for trees: {', '.join(missing_after)}")
+                return {'is_valid': False, 'message': ' | '.join(message)}
+            
+            return {'is_valid': True, 'message': 'Batch validation successful'}
+            
+        except Exception as e:
+            return {'is_valid': False, 'message': f'Validation error: {str(e)}'}
 
     def load_image_cache(self):
         self.image_cache = {}
@@ -1999,6 +2252,41 @@ class TreeInventoryApp:
         thread.daemon = True
         thread.start()
         return thread
+
+    def update_cutting_batch_calculation(self, *args):
+        """Update the batch calculation display for cutting mode."""
+        try:
+            if not hasattr(self, 'cutting_excel_file') or not self.cutting_excel_file:
+                self.cutting_batch_calc_label.config(text="Estimated batches: --")
+                return
+                
+            # Read Excel file to get total rows
+            df = pd.read_excel(self.cutting_excel_file)
+            total_rows = len(df)
+            
+            # Get current batch size
+            try:
+                batch_size = int(self.cutting_batch_size_var.get())
+                if batch_size < 1:
+                    raise ValueError("Batch size must be positive")
+            except ValueError:
+                self.cutting_batch_calc_label.config(text="Estimated batches: Invalid batch size")
+                return
+            
+            # Calculate number of batches
+            num_batches = math.ceil(total_rows / batch_size)
+            
+            # Update display
+            self.cutting_batch_calc_label.config(
+                text=f"Estimated batches: {num_batches} (Total rows: {total_rows})",
+                fg="#FFFFFF"
+            )
+            
+        except Exception as e:
+            self.cutting_batch_calc_label.config(
+                text=f"Error calculating batches: {str(e)}",
+                fg="#FF0000"
+            )
 
 if __name__ == "__main__":
     root = tk.Tk()
